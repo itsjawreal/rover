@@ -102,19 +102,19 @@ choose_option() {
   shift
   local options=("$@")
   local choice=""
-  printf '%s\n' "$prompt"
+  printf '%s\n' "$prompt" >&2
   local i=1
   for option in "${options[@]}"; do
-    printf '  %d) %s\n' "$i" "$option"
+    printf '  %d) %s\n' "$i" "$option" >&2
     i=$((i + 1))
   done
   while true; do
-    read -r -p "Choice [1-${#options[@]}]: " choice
+    read -r -p "Choice [1-${#options[@]}]: " choice >&2
     if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
       printf '%s' "$choice"
       return 0
     fi
-    warn "Invalid choice. Please select a number between 1 and ${#options[@]}."
+    printf '[warn] Invalid choice. Please select a number between 1 and %d.\n' "${#options[@]}" >&2
   done
 }
 
