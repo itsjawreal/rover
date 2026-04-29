@@ -23,6 +23,7 @@ class InstallScriptTests(unittest.TestCase):
         self.assertIn("Use existing value from .env", text)
         self.assertIn("Replace with a new value", text)
         self.assertIn("Clear saved value and continue without it", text)
+        self.assertIn("Choose how to handle existing Codex auth", text)
 
     def test_remote_bootstrap_script_exists(self) -> None:
         script = Path("scripts/bootstrap.sh")

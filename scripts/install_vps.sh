@@ -68,6 +68,16 @@ print("ok")
 PY
 }
 
+codex_login_ready() {
+  if ! has_cmd codex; then
+    return 1
+  fi
+  if [ -n "${OPENAI_API_KEY:-}" ]; then
+    return 0
+  fi
+  codex login status >/dev/null 2>&1
+}
+
 update_env() {
   local key="$1"
   local value="$2"
@@ -329,6 +339,26 @@ configure_codex_backend() {
   else
     hint "Local machine detected."
     hint "Browser login is usually fine here. If it fails, rerun setup and choose device auth instead."
+  fi
+
+  if codex_login_ready; then
+    ok "Existing Codex authentication detected"
+    local existing_auth_choice
+    existing_auth_choice="$(choose_option "Choose how to handle existing Codex auth:" \
+      "Keep the existing Codex login" \
+      "Save OPENAI_API_KEY instead" \
+      "Re-run Codex login flow")"
+    case "$existing_auth_choice" in
+      1)
+        return 0
+        ;;
+      2)
+        prompt_env_value "OPENAI_API_KEY" "Enter OPENAI_API_KEY (input hidden):" true
+        return 0
+        ;;
+      3)
+        ;;
+    esac
   fi
 
   local auth_choice

@@ -6,8 +6,32 @@ import shutil
 import sys
 from pathlib import Path
 
+
+def _looks_like_repo_root(path: Path) -> bool:
+    return (
+        (path / "README.md").exists()
+        and (path / "app" / "builder.py").exists()
+        and (path / "src" / "config.py").exists()
+    )
+
+
+def _discover_root() -> Path:
+    env_root = os.getenv("GITHUB_CONTRIBUTION_ENGINE_ROOT", "").strip()
+    if env_root:
+        candidate = Path(env_root).expanduser().resolve()
+        if _looks_like_repo_root(candidate):
+            return candidate
+
+    cwd = Path.cwd().resolve()
+    for candidate in (cwd, *cwd.parents):
+        if _looks_like_repo_root(candidate):
+            return candidate
+
+    return Path(__file__).resolve().parent.parent
+
+
 # ── Environment ──────────────────────────────────────────────
-ROOT = Path(__file__).parent.parent
+ROOT = _discover_root()
 ENV_FILE = ROOT / ".env"
 if ENV_FILE.exists():
     for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
