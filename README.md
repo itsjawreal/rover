@@ -4,14 +4,12 @@
 
 Autonomous contribution engine for finding, verifying, submitting, tracking, and learning from GitHub pull requests.
 
-This repo is now dedicated to contribution workflows only. The old crypto tool generation/adapt pipeline was archived to `E:\newbot\newauto\genoshide\crypto-builder-oldm`.
-
 ## What It Does
 
 - Discovers active open-source repositories worth contributing to.
 - Scans code locally for narrow, evidence-backed contribution opportunities.
 - Qualifies opportunities before spending AI calls.
-- Uses Codex or Claude CLI to produce focused patches and PR bodies.
+- Uses Codex CLI as the default tested backend and Claude CLI as a supported fallback to produce focused patches and PR bodies.
 - Can present itself under different agent-tool and model-series labels for demos, grant forms, and operator environments.
 - Submits PRs through GitHub CLI.
 - Tracks PR lifecycle, maintainer feedback, rejections, queue state, and run summaries in SQLite.
@@ -35,6 +33,8 @@ python -m app.builder --contrib-respond
 python -m app.builder --contrib-report
 python -m app.builder --doctor
 python -m app.builder --repo-inspect owner/repo
+python -m app.builder --command-text "buat 1 kontribusi"
+python -m app.builder --command-text "cek repo owner/repo dulu"
 ```
 
 Compatibility aliases are still available:
@@ -44,6 +44,16 @@ python -m app.builder --pr --1
 python -m app.builder --pr-check
 python -m app.builder --pr-respond
 ```
+
+Natural-language routing is also available for channel-style inputs:
+
+- `buat 1 kontribusi`
+- `jalankan 1 pr ke owner/repo`
+- `buat satu pull request ke https://github.com/owner/repo`
+- `cek repo owner/repo dulu`
+
+These phrases are mapped to canonical engine actions like `contrib_once`, `contrib_targeted`, `repo_inspect`, `contrib_check`, and `doctor`.
+For safety, natural-language contribution requests default to preview mode unless the request explicitly asks for live submission.
 
 ## Submission-Ready Demo
 
@@ -84,7 +94,8 @@ Core modules:
 
 The main state unit is an `Opportunity`, not a repo. Opportunities move through states like `SCAN`, `QUALIFY`, `EXECUTE`, `VERIFY`, `READY`, `SUBMIT`, and `REJECT`.
 
-Behavioral policy is defined primarily in [skill.md](E:/newbot/newauto/genoshide/crypto-builder/skill.md), with repo-specific operating guidance in [AGENTS.md](E:/newbot/newauto/genoshide/crypto-builder/AGENTS.md).
+Behavioral policy is defined primarily in [skill.md](skill.md), with repo-specific operating guidance in [AGENTS.md](AGENTS.md).
+Provider-specific operator notes live under [docs/agents/README.md](docs/agents/README.md).
 
 ## Quality Policy
 
@@ -159,6 +170,7 @@ Notes:
 - `CLAUDE_CMD=claude` is preferred over a user-specific Windows path.
 - `AGENT_TOOL` is the user-facing tool label for demos/forms. Defaults to `Codex` or `Claude Code` based on `AI_BACKEND`.
 - `MODEL_SERIES` is the user-facing primary model family label. Defaults to `GPT` or `Claude` based on `AI_BACKEND`.
+- Today only `Codex` and `Claude Code` map to real backend paths. Labels like `Aider`, `Cline`, `Cursor`, `OpenCode`, `Windsurf`, and `Other` are metadata-only until adapters are implemented.
 - `CONTRIB_AUTORUN_ARGS` controls what `python run.py` and scheduled tasks do by default.
 - `CONTRIB_LANE` supports built-in presets: `general`, `crypto`, `devtools`, `frontend`, `data`, `infra`, `ml`, `docs`.
 - `CONTRIB_TOPIC_KEYWORDS` and `CONTRIB_SEARCH_QUERIES` override the preset when you need custom targeting.
@@ -200,8 +212,86 @@ This checks:
 
 Current portability status:
 
-- Codex CLI and Claude CLI workflows are supported now.
+- Codex CLI is the default tested path.
+- Claude CLI is a supported fallback path.
+- Other agent-tool labels are documentation/demo metadata until a real backend adapter exists.
 - API-key-only LLM operation is not implemented yet, so users without a supported CLI backend will currently be blocked.
+
+## MCP Server
+
+This repo now includes a minimal MCP server for agent integrations.
+
+Current MCP tools:
+
+- `doctor`
+- `contrib_report`
+- `route_command`
+- `repo_inspect`
+- `contrib_once`
+- `contrib_targeted`
+- `contrib_check`
+
+Run it locally:
+
+```powershell
+python -m src.contribution_mcp
+```
+
+Or with streamable HTTP transport if your MCP client expects it:
+
+```powershell
+python -m src.contribution_mcp streamable-http
+```
+
+What this gives you:
+
+- Telegram/OpenClaw/Claude/Desktop agents can call structured tools instead of shell commands
+- natural-language requests can be normalized through `route_command`
+- contribution runs stay behind the same engine safety rules
+
+Example OpenClaw-style flow:
+
+- user says `buat 1 kontribusi`
+- client calls `route_command(text=...)`
+- client receives canonical action like `contrib_once`
+- client then calls `contrib_once(dry_run=true)`
+
+Installable path:
+
+```powershell
+uv tool install git+https://github.com/BigNounce90/github-contribution-engine.git
+```
+
+After install, the MCP entrypoint becomes:
+
+```powershell
+contribution-mcp
+```
+
+And the main contribution CLI becomes:
+
+```powershell
+github-contribution-engine --doctor
+```
+
+Example Claude Desktop / OpenClaw MCP config:
+
+```json
+{
+  "mcpServers": {
+    "contribution-engine": {
+      "command": "uv",
+      "args": [
+        "tool",
+        "run",
+        "--from",
+        "git+https://github.com/BigNounce90/github-contribution-engine.git",
+        "contribution-mcp"
+      ]
+    }
+  }
+}
+```
 
 ## Verification
 
@@ -222,9 +312,10 @@ For Xiaomi MiMo Orbit or similar builder submissions, the recommended proof bund
 
 ## Active Docs
 
-- [FEATURES.md](E:/newbot/newauto/genoshide/crypto-builder/FEATURES.md): capability map for the current engine
-- [PRODUCT_STATUS.md](E:/newbot/newauto/genoshide/crypto-builder/PRODUCT_STATUS.md): current strengths, bottlenecks, and recommended usage
-- [skill.md](E:/newbot/newauto/genoshide/crypto-builder/skill.md): source of truth for contribution-engine behavior
-- [AGENTS.md](E:/newbot/newauto/genoshide/crypto-builder/AGENTS.md): repo mission, architecture, and verification rules
-- [.agent.md](E:/newbot/newauto/genoshide/crypto-builder/.agent.md): local agent execution persona
-- [ALUR.md](E:/newbot/newauto/genoshide/crypto-builder/ALUR.md): concise end-to-end contribution flow
+- [FEATURES.md](FEATURES.md): capability map for the current engine
+- [PRODUCT_STATUS.md](PRODUCT_STATUS.md): current strengths, bottlenecks, and recommended usage
+- [skill.md](skill.md): source of truth for contribution-engine behavior
+- [AGENTS.md](AGENTS.md): repo mission, architecture, and verification rules
+- [.agent.md](.agent.md): local agent execution persona
+- [docs/agents/README.md](docs/agents/README.md): provider-specific operator notes
+- [CONTRIBUTION_FLOW.md](CONTRIBUTION_FLOW.md): concise end-to-end contribution flow

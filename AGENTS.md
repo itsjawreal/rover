@@ -1,10 +1,6 @@
 # Context - GitHub Contribution Engine
 
-This repository is now dedicated to one product: an autonomous GitHub contribution engine.
-
-The archived crypto tool builder/adapt pipeline lives at:
-
-`E:\newbot\newauto\genoshide\crypto-builder-oldm`
+This repository is dedicated to one product: an autonomous GitHub contribution engine.
 
 ## Mission
 
@@ -50,6 +46,8 @@ Do not introduce direct OpenAI SDK calls for contribution generation.
 `skill.md` is the primary source of truth for agent behavior in this repository.
 
 `.agent.md` should align to that policy as the local execution persona.
+
+Provider-specific operator notes should live under `docs/agents/` so tool differences stay documented without splitting the root policy.
 
 Legacy crypto-builder guidance must not be treated as active instruction for this repo.
 

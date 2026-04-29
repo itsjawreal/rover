@@ -350,6 +350,7 @@ class OperatorExperienceTests(unittest.TestCase):
         self.assertIn("Contribution Engine Doctor", report)
         self.assertIn("Summary:", report)
         self.assertIn("Operator readiness:", report)
+        self.assertIn("Support matrix:", report)
 
     def test_queue_and_open_pr_pacing(self) -> None:
         store, _ = self._make_store()
@@ -366,7 +367,7 @@ class OperatorExperienceTests(unittest.TestCase):
             acceptance_score=80,
         )
         opportunity_id = store.create_opportunity(1, opportunity)
-        store.record_pull_request(opportunity_id, candidate.full_name, "https://github.com/example/repo/pull/1", "fix: add timeout", "genoshide/repo", "branch", "bug_fix")
+        store.record_pull_request(opportunity_id, candidate.full_name, "https://github.com/example/repo/pull/1", "fix: add timeout", "currentuser/repo", "branch", "bug_fix")
 
         self.assertTrue(store.has_open_pr(candidate.full_name))
 

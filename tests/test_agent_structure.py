@@ -90,6 +90,8 @@ class AgentStructureTests(unittest.TestCase):
         self.assertEqual(artifact.selected_repo, "HKUDS/Vibe-Trading")
         self.assertIn("acceptance-first", artifact.reason_for_selection)
         self.assertEqual(artifact.metadata["mode"], "demo")
+        self.assertIn("backend", artifact.metadata)
+        self.assertIn("backend_support_level", artifact.metadata)
 
     def test_save_run_log_writes_json_and_markdown(self) -> None:
         artifact = _demo_artifact("Codex", "GPT")

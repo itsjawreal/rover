@@ -262,8 +262,8 @@ class PRGeneratorHardeningTests(unittest.TestCase):
                     "full_name": "example/upstream-repo",
                     "pr_url": "https://github.com/example/upstream-repo/pull/10",
                     "pr_title": "fix: sample",
-                    "fork_name": "genoshide/upstream-repo",
-                    "branch_name": "genoshide-patch-1",
+                    "fork_name": "currentuser/upstream-repo",
+                    "branch_name": "currentuser-patch-1",
                     "files_changed": ["src/foo.py"],
                     "submitted_at": "2026-04-28T10:00:00",
                     "status": "closed",
@@ -273,7 +273,7 @@ class PRGeneratorHardeningTests(unittest.TestCase):
         }
 
         with patch("src.pr_generator.load_pr_log", return_value=data), \
-             patch("src.fork.get_current_github_login", return_value="genoshide"), \
+             patch("src.fork.get_current_github_login", return_value="currentuser"), \
              patch("pathlib.Path.write_text") as mocked_write, \
              patch("subprocess.run") as mocked_run:
             mocked_run.return_value.returncode = 0

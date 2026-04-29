@@ -8,6 +8,7 @@ import sys
 from textwrap import dedent
 
 from src.ai import get_usage, reset_usage
+from src.command_router import parse_command_text
 from src.config import DRY_RUN
 from src.doctor import build_doctor_report
 from src.fork import (
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--codex", action="store_true", help="Select Codex backend through src.config side effects.")
     parser.add_argument("--claude", action="store_true", help="Select Claude backend through src.config side effects.")
     parser.add_argument("--dry-run", action="store_true", help="Generate and verify changes without submitting a PR.")
+    parser.add_argument("--command-text", default="", help="Interpret a natural-language command and map it onto a safe canonical engine action.")
     return parser
 
 
@@ -239,6 +241,48 @@ def inspect_repo(repo: str, log: logging.Logger) -> None:
     print(build_repo_inspect_report(candidate))
 
 
+def _apply_command_text(args: argparse.Namespace, log: logging.Logger) -> None:
+    if not args.command_text:
+        return
+    if any((args.doctor, args.contrib_report, args.repo_inspect, args.contrib_check, args.contrib_respond, args.contrib is not None)):
+        log.info("Skipping natural-language command routing because an explicit CLI action was already provided.")
+        return
+
+    request = parse_command_text(args.command_text)
+    log.info(
+        "Natural-language command mapped to action=%s repo=%s count=%d dry_run=%s confidence=%s",
+        request.action,
+        request.repo or "<search>",
+        request.count,
+        request.dry_run,
+        request.confidence,
+    )
+    for reason in request.rationale:
+        log.info("  route: %s", reason)
+
+    if request.action == "doctor":
+        args.doctor = True
+        return
+    if request.action == "contrib_report":
+        args.contrib_report = True
+        return
+    if request.action == "contrib_check":
+        args.contrib_check = True
+        return
+    if request.action == "contrib_respond":
+        args.contrib_respond = True
+        return
+    if request.action == "repo_inspect":
+        args.repo_inspect = request.repo
+        return
+
+    args.contrib = request.repo if request.repo else ""
+    args.count = request.count
+    args.goal = request.goal
+    args.first_pr = request.first_pr
+    args.dry_run = request.dry_run
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args, unknown = parser.parse_known_args(argv)
@@ -258,6 +302,7 @@ def main(argv: list[str] | None = None) -> None:
     log.info("  GitHub Contribution Engine started")
     log.info("=" * 55)
     cleanup_old_logs()
+    _apply_command_text(args, log)
 
     if args.repo_inspect:
         inspect_repo(args.repo_inspect, log)

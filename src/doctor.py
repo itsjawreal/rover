@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.agent_models import get_runtime_profile, iter_agent_tool_support
 from src.config import (
     AI_BACKEND,
     CLAUDE_CMD,
@@ -66,6 +67,7 @@ def _masked_present(value: str) -> str:
 
 def collect_doctor_checks() -> list[DoctorCheck]:
     checks: list[DoctorCheck] = []
+    runtime = get_runtime_profile()
 
     checks.append(
         DoctorCheck(
@@ -122,7 +124,7 @@ def collect_doctor_checks() -> list[DoctorCheck]:
         DoctorCheck(
             "ai-backend",
             "ok" if AI_BACKEND in {"codex", "claude"} else "warn",
-            f"configured backend={AI_BACKEND}",
+            f"configured backend={AI_BACKEND} runtime={runtime.backend}",
         )
     )
 
@@ -140,6 +142,22 @@ def collect_doctor_checks() -> list[DoctorCheck]:
             "claude-cli",
             "ok" if claude_ok else "warn",
             f"CLAUDE_CMD={CLAUDE_CMD!r} {'available' if claude_ok else 'not found'}",
+        )
+    )
+
+    selected_backend_ok = claude_ok if runtime.backend == "claude-cli" else codex_ok
+    checks.append(
+        DoctorCheck(
+            "agent-runtime",
+            "ok" if runtime.support_level in {"tested", "supported"} else "warn",
+            f"agent_tool={runtime.agent_tool} backend={runtime.backend} support={runtime.support_level}",
+        )
+    )
+    checks.append(
+        DoctorCheck(
+            "selected-backend",
+            "ok" if selected_backend_ok else "fail",
+            f"{runtime.backend} {'available' if selected_backend_ok else 'not found'} for the active runtime path",
         )
     )
 
@@ -209,6 +227,7 @@ def collect_doctor_checks() -> list[DoctorCheck]:
 
 def build_doctor_report() -> str:
     checks = collect_doctor_checks()
+    runtime = get_runtime_profile()
     lines = [
         "Contribution Engine Doctor",
         "==========================",
@@ -229,6 +248,7 @@ def build_doctor_report() -> str:
             "",
             f"Summary: ok={counts.get('ok', 0)} warn={counts.get('warn', 0)} fail={counts.get('fail', 0)}",
             f"Overall: {overall.upper()}",
+            f"Active runtime: tool={runtime.agent_tool} backend={runtime.backend} support={runtime.support_level}",
             "",
             "Operator readiness:",
         ]
@@ -265,6 +285,11 @@ def build_doctor_report() -> str:
 
     lines.extend(
         [
+            "",
+            "Support matrix:",
+            "- Codex: tested default CLI path.",
+            "- Claude Code: supported fallback CLI path.",
+            "- OpenCode/Aider/Cline/Cursor/Windsurf/Other: label-only until a real backend adapter exists.",
             "",
             "Open-source readiness note:",
             "- CLI-based Codex/Claude operation is supported now.",

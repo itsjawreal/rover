@@ -45,31 +45,31 @@ class ForkSubmissionTests(unittest.TestCase):
 
     def test_wait_for_fork_ready_retries_until_repo_is_visible(self) -> None:
         responses = [
-            _cp(1, stderr="GraphQL: Could not resolve to a Repository with the name 'genoshide/free-claude-code'."),
-            _cp(0, stdout='{"nameWithOwner":"genoshide/free-claude-code"}'),
+            _cp(1, stderr="GraphQL: Could not resolve to a Repository with the name 'currentuser/free-claude-code'."),
+            _cp(0, stdout='{"nameWithOwner":"currentuser/free-claude-code"}'),
         ]
 
         with patch("src.fork._run", side_effect=responses), patch("time.sleep") as mocked_sleep:
-            _wait_for_fork_ready("genoshide/free-claude-code", logging.getLogger("test"), timeout_s=10, poll_interval_s=1)
+            _wait_for_fork_ready("currentuser/free-claude-code", logging.getLogger("test"), timeout_s=10, poll_interval_s=1)
 
         mocked_sleep.assert_called_once_with(1)
 
     def test_wait_for_fork_ready_raises_after_timeout(self) -> None:
         with patch(
             "src.fork._run",
-            return_value=_cp(1, stderr="GraphQL: Could not resolve to a Repository with the name 'genoshide/free-claude-code'."),
+            return_value=_cp(1, stderr="GraphQL: Could not resolve to a Repository with the name 'currentuser/free-claude-code'."),
         ), patch("time.sleep"):
             with self.assertRaises(ForkError):
-                _wait_for_fork_ready("genoshide/free-claude-code", logging.getLogger("test"), timeout_s=1, poll_interval_s=1)
+                _wait_for_fork_ready("currentuser/free-claude-code", logging.getLogger("test"), timeout_s=1, poll_interval_s=1)
 
     def test_clone_repo_with_retry_recovers_after_eventual_consistency_delay(self) -> None:
         responses = [
-            _cp(1, stderr="GraphQL: Could not resolve to a Repository with the name 'genoshide/free-claude-code'."),
+            _cp(1, stderr="GraphQL: Could not resolve to a Repository with the name 'currentuser/free-claude-code'."),
             _cp(0, stdout="cloned"),
         ]
 
         with patch("src.fork._run", side_effect=responses), patch("time.sleep") as mocked_sleep:
-            _clone_repo_with_retry("genoshide/free-claude-code", Path("C:/tmp/repo"), logging.getLogger("test"), attempts=2, delay_s=1)
+            _clone_repo_with_retry("currentuser/free-claude-code", Path("C:/tmp/repo"), logging.getLogger("test"), attempts=2, delay_s=1)
 
         mocked_sleep.assert_called_once_with(1)
 

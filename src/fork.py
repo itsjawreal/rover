@@ -400,7 +400,7 @@ def fix_and_push_own_repo(
     log: logging.Logger,
     improvement_type: str = "",
 ) -> PRResult:
-    """Apply a fix directly to a genoshide-owned repo — no fork, no PR.
+    """Apply a fix directly to an operator-owned repo — no fork, no PR.
 
     Clones the repo, applies changed files, commits, and pushes directly to
     the default branch. Returns a PRResult with pr_url='' (no PR was opened).

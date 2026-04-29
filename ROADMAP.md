@@ -1,6 +1,6 @@
 # Roadmap
 
-The practical active roadmap now lives in [ROADMAP_V2.md](E:/newbot/newauto/genoshide/crypto-builder/ROADMAP_V2.md).
+The practical active roadmap now lives in [ROADMAP_V2.md](ROADMAP_V2.md).
 
 This file stays as a short pointer so the repo has one active roadmap source instead of two competing versions.
 
@@ -14,5 +14,5 @@ This file stays as a short pointer so the repo has one active roadmap source ins
 
 ## Use This Next
 
-- Read [ROADMAP_V2.md](E:/newbot/newauto/genoshide/crypto-builder/ROADMAP_V2.md) for phased deliverables and release posture.
-- Read [PRODUCT_STATUS.md](E:/newbot/newauto/genoshide/crypto-builder/PRODUCT_STATUS.md) for what is already working and what still blocks a broader publish.
+- Read [ROADMAP_V2.md](ROADMAP_V2.md) for phased deliverables and release posture.
+- Read [PRODUCT_STATUS.md](PRODUCT_STATUS.md) for what is already working and what still blocks a broader publish.

@@ -47,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _demo_artifact(agent_tool: str, model_series: str, issue_url: str = "", repo: str = "") -> RunArtifact:
+    runtime = get_runtime_profile()
     selected_repo = repo or "HKUDS/Vibe-Trading"
     selected_issue = issue_url or "missing_input_validation in agent/backtest/validation.py"
     pr_body = (
@@ -84,6 +85,9 @@ def _demo_artifact(agent_tool: str, model_series: str, issue_url: str = "", repo
             "goal": "bugfix",
             "agent_tool": agent_tool,
             "model_series": model_series,
+            "backend": runtime.backend,
+            "backend_support_level": runtime.support_level,
+            "backend_support_note": runtime.support_note,
             "issue_type": "bug",
             "qualification_score": 92,
             "validation_command": "pytest agent/tests/test_validation_cli.py -q",
@@ -136,6 +140,9 @@ def main(argv: list[str] | None = None) -> None:
                 "goal": args.goal,
                 "agent_tool": agent_tool,
                 "model_series": model_series,
+                "backend": runtime.backend,
+                "backend_support_level": runtime.support_level,
+                "backend_support_note": runtime.support_note,
                 "issue_analysis_reason": analysis.reason,
                 "issue_type": analysis.issue_type,
                 "qualification_score": analysis.qualification_score,
@@ -167,6 +174,9 @@ def main(argv: list[str] | None = None) -> None:
             "reason_for_selection": artifact.reason_for_selection,
             "agent_tool": agent_tool,
             "model_series": model_series,
+            "backend": runtime.backend,
+            "backend_support_level": runtime.support_level,
+            "backend_support_note": runtime.support_note,
             "planned_fix": artifact.planned_fix,
             "changed_files": artifact.changed_files,
             "validation_result": artifact.validation_result,

@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 
 from src.agent_models import (
+    get_agent_tool_support,
+    get_backend_label,
     SUPPORTED_AGENT_TOOLS,
     SUPPORTED_MODEL_SERIES,
     get_runtime_profile,
@@ -30,3 +32,13 @@ class AgentModelSupportTests(unittest.TestCase):
         profile = get_runtime_profile()
         self.assertTrue(profile.agent_tool)
         self.assertTrue(profile.model_series)
+        self.assertTrue(profile.backend)
+        self.assertTrue(profile.support_level)
+
+    def test_backend_label_matches_supported_defaults(self) -> None:
+        self.assertIn(get_backend_label(), {"codex-cli", "claude-cli"})
+
+    def test_agent_tool_support_levels_are_honest(self) -> None:
+        self.assertEqual(get_agent_tool_support("Codex").support_level, "tested")
+        self.assertEqual(get_agent_tool_support("Claude Code").support_level, "supported")
+        self.assertEqual(get_agent_tool_support("Aider").support_level, "label-only")

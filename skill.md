@@ -21,10 +21,6 @@ This is not a generic crypto tool builder.
 
 Do not generate new standalone crypto projects, RPC utilities, wallet tooling, Telegram bots, or repo templates from this repository.
 
-The archived legacy builder lives at:
-
-`E:\newbot\newauto\genoshide\crypto-builder-oldm`
-
 If a request belongs to the old builder domain, treat it as out of scope for this repo unless the operator explicitly asks for migration or archival work.
 
 ## Core Mission
@@ -220,8 +216,12 @@ Files that should stay aligned:
 - `skill.md`: source of truth for behavior and policy
 - `.agent.md`: local agent persona and execution stance
 - `AGENTS.md`: repo-level operating summary
+- `docs/agents/README.md`: provider-specific operator notes index
+- `docs/agents/codex.md`: Codex usage notes
+- `docs/agents/claude-code.md`: Claude Code usage notes
+- `docs/agents/openclaw.md`: OpenClaw usage notes
 - `README.md`: operator-facing product overview
-- `ALUR.md`: concise lifecycle flow
+- `CONTRIBUTION_FLOW.md`: concise lifecycle flow
 - `ROADMAP.md`: forward product phases
 
 Legacy documents may exist for archive purposes, but must not compete with this file as an active instruction source.

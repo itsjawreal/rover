@@ -1041,7 +1041,7 @@ def check_pr_statuses(log: logging.Logger) -> None:
 def fetch_repo_candidate(repo_url: str, log: logging.Logger) -> RepoCandidate:
     """Fetch a specific repo by URL or owner/repo and return a RepoCandidate.
 
-    Works for both external repos and genoshide's own repos.
+    Works for both external repos and operator-owned repos.
     Raises ScraperError if the repo can't be fetched or has no Python/TypeScript files.
     """
     return fetch_repo_candidate_with_scope(repo_url, log, enforce_scope=True)
@@ -1351,7 +1351,7 @@ def check_pr_feedback(log: logging.Logger) -> None:
 
     For each open PR in pr_log.json:
     - Fetches comments since last_seen_comment_id
-    - Skips bots and genoshide's own comments
+    - Skips bots and the current operator's own comments
     - For each new maintainer comment: generates AI response, applies code fix
       (if needed), pushes to existing branch, posts reply comment
     - Updates last_seen_comment_id in pr_log.json
@@ -1375,8 +1375,14 @@ def check_pr_feedback(log: logging.Logger) -> None:
     log.info("Checking %d open PR(s) for maintainer feedback...", len(open_entries))
     changed = False
 
+    try:
+        from src.fork import get_current_github_login
+        current_login = get_current_github_login().lower()
+    except Exception:
+        current_login = ""
+
     def _is_human(user: str) -> bool:
-        return not user.endswith("[bot]") and user.lower() != "genoshide"
+        return not user.endswith("[bot]") and user.lower() != current_login
 
     for entry in open_entries:
         pr_url    = entry["pr_url"]
@@ -1521,6 +1527,12 @@ def get_followup_candidates(
     and cooldown has passed since last submission to that repo.
     Returns list sorted by most-recently-merged first.
     """
+    try:
+        from src.fork import get_current_github_login
+        current_login = get_current_github_login().lower()
+    except Exception:
+        current_login = ""
+
     entries = load_pr_log().get("submitted", [])
     now = datetime.now(timezone.utc)
 
@@ -1534,7 +1546,7 @@ def get_followup_candidates(
     for full_name, repo_entries in by_repo.items():
         if full_name in blacklisted:
             continue
-        if full_name.startswith("genoshide/"):
+        if current_login and full_name.startswith(f"{current_login}/"):
             continue
 
         statuses = {e.get("status", "open") for e in repo_entries}
@@ -1593,13 +1605,18 @@ def find_pr_target(
     - Pushed within PR_MAX_PUSHED_DAYS
     - Has open issues (signal that maintainer is engaged)
     - Allowed license
-    - Not genoshide's own repo
+    - Not the current operator's own repo
     - Not already PR'd or blacklisted
     """
     shortlister = RepoShortlister(_ENGINE_STORE)
     log.info("Contribution lane: %s", _LANE_NAME)
     if first_pr_mode:
         log.info("First-PR mode: enabled")
+    try:
+        from src.fork import get_current_github_login
+        current_login = get_current_github_login().lower()
+    except Exception:
+        current_login = ""
 
     # ── Follow-up pass: prioritize repos where we already merged ─
     followup = get_followup_candidates(blacklisted, already_prd)
@@ -1651,7 +1668,7 @@ def find_pr_target(
         for item in data.get("items", []):
             full_name = item.get("full_name", "")
 
-            if full_name.lower().startswith("genoshide/"):
+            if current_login and full_name.lower().startswith(f"{current_login}/"):
                 continue
             if full_name.lower() in already_prd or full_name.lower() in blacklisted:
                 continue
@@ -1762,7 +1779,7 @@ _PYPI_API = "https://pypi.org/pypi/{package}/json"
 _NPM_API  = "https://registry.npmjs.org/{package}/latest"
 
 # Packages that should never be bumped (internal, git-sourced, or intentionally pinned)
-_DEP_SKIP_PREFIXES = ("genoshide", "genotools", "solanakit", "gw", "git+", "http")
+_DEP_SKIP_PREFIXES = ("genotools", "solanakit", "gw", "git+", "http")
 _DEP_SKIP_EXACT = {"python", "pip", "setuptools", "wheel", "pkg_resources"}
 
 
