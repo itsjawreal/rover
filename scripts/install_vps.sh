@@ -5,17 +5,48 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="${VENV_DIR:-$ROOT_DIR/.venv}"
 ENV_FILE="$ROOT_DIR/.env"
 EXAMPLE_ENV_FILE="$ROOT_DIR/.env.example"
+SETUP_STEP=0
+
+if [ -t 1 ]; then
+  C_RESET="$(printf '\033[0m')"
+  C_BOLD="$(printf '\033[1m')"
+  C_BLUE="$(printf '\033[34m')"
+  C_GREEN="$(printf '\033[32m')"
+  C_YELLOW="$(printf '\033[33m')"
+  C_MAGENTA="$(printf '\033[35m')"
+else
+  C_RESET=""
+  C_BOLD=""
+  C_BLUE=""
+  C_GREEN=""
+  C_YELLOW=""
+  C_MAGENTA=""
+fi
+
+banner() {
+  printf '\n%s%sGitHub Contribution Engine Setup%s\n' "$C_BOLD" "$C_MAGENTA" "$C_RESET"
+  printf '%sAcceptance-first installer for VPS and MCP usage%s\n\n' "$C_BLUE" "$C_RESET"
+}
+
+section() {
+  SETUP_STEP=$((SETUP_STEP + 1))
+  printf '\n%s[%02d]%s %s%s%s\n' "$C_MAGENTA" "$SETUP_STEP" "$C_RESET" "$C_BOLD" "$1" "$C_RESET"
+}
 
 log() {
-  printf '[setup] %s\n' "$1"
+  printf '%s[setup]%s %s\n' "$C_BLUE" "$C_RESET" "$1"
 }
 
 warn() {
-  printf '[warn] %s\n' "$1"
+  printf '%s[warn]%s %s\n' "$C_YELLOW" "$C_RESET" "$1"
 }
 
 todo() {
-  printf '[todo] %s\n' "$1"
+  printf '%s[todo]%s %s\n' "$C_MAGENTA" "$C_RESET" "$1"
+}
+
+ok() {
+  printf '%s[ok]%s %s\n' "$C_GREEN" "$C_RESET" "$1"
 }
 
 has_cmd() {
@@ -102,10 +133,10 @@ choose_option() {
   shift
   local options=("$@")
   local choice=""
-  printf '%s\n' "$prompt" >&2
+  printf '%s%s%s\n' "$C_BOLD" "$prompt" "$C_RESET" >&2
   local i=1
   for option in "${options[@]}"; do
-    printf '  %d) %s\n' "$i" "$option" >&2
+    printf '  %s%d)%s %s\n' "$C_BLUE" "$i" "$C_RESET" "$option" >&2
     i=$((i + 1))
   done
   while true; do
@@ -114,7 +145,7 @@ choose_option() {
       printf '%s' "$choice"
       return 0
     fi
-    printf '[warn] Invalid choice. Please select a number between 1 and %d.\n' "${#options[@]}" >&2
+    printf '%s[warn]%s Invalid choice. Please select a number between 1 and %d.\n' "$C_YELLOW" "$C_RESET" "${#options[@]}" >&2
   done
 }
 
@@ -270,12 +301,14 @@ configure_api_key_backend() {
 }
 
 main() {
+  banner
   log "bootstrap starting in $ROOT_DIR"
 
+  section "System prerequisites"
   apt_install_if_missing git git
   apt_install_if_missing python3 python3
   if python_has_venv; then
-    log "python3 venv module already available"
+    ok "python3 venv module already available"
   else
     apt_install_if_missing python3-venv python3-venv
   fi
@@ -283,6 +316,7 @@ main() {
   apt_install_if_missing gh gh
   install_uv_if_missing
 
+  section "Python environment"
   if [ ! -d "$VENV_DIR" ]; then
     log "creating virtual environment at $VENV_DIR"
     python3 -m venv "$VENV_DIR"
@@ -298,6 +332,7 @@ main() {
   log "installing github-contribution-engine package"
   python -m pip install "$ROOT_DIR"
 
+  section "Project configuration"
   if [ ! -f "$ENV_FILE" ] && [ -f "$EXAMPLE_ENV_FILE" ]; then
     log "creating .env from .env.example"
     cp "$EXAMPLE_ENV_FILE" "$ENV_FILE"
@@ -305,8 +340,10 @@ main() {
     log ".env already present or .env.example missing"
   fi
 
+  section "GitHub authentication"
   configure_github_auth
 
+  section "AI backend selection"
   local backend_choice
   backend_choice="$(choose_option "Select your primary AI backend for this machine:" \
     "Codex CLI" \
@@ -320,11 +357,13 @@ main() {
     4) warn "Skipping backend setup for now" ;;
   esac
 
+  section "Readiness check"
   log "running doctor"
   github-contribution-engine --doctor || true
 
   printf '\n'
-  log "bootstrap complete"
+  ok "bootstrap complete"
+  printf '%sNext steps%s\n' "$C_BOLD" "$C_RESET"
   todo "Run: source \"$VENV_DIR/bin/activate\""
   if ! gh auth status >/dev/null 2>&1; then
     todo "Run: gh auth login"
