@@ -351,6 +351,7 @@ class OperatorExperienceTests(unittest.TestCase):
         self.assertIn("Summary:", report)
         self.assertIn("Operator readiness:", report)
         self.assertIn("Support matrix:", report)
+        self.assertIn("OpenClaw integration note:", report)
 
     def test_queue_and_open_pr_pacing(self) -> None:
         store, _ = self._make_store()
@@ -464,6 +465,32 @@ class OperatorExperienceTests(unittest.TestCase):
         self.assertIn("Recent runs", report)
         self.assertIn("Ready queue", report)
         self.assertIn("missing_timeout", report)
+
+    def test_contribution_report_dedupes_ready_queue_duplicates(self) -> None:
+        store, _ = self._make_store()
+        engine = ContributionEngine(store)
+        run_id = engine.start_run("search", 1)
+        candidate = _candidate({"client.py": "print('ok')\n"})
+        for score in (80, 79, 78):
+            opportunity = Opportunity(
+                repo_full_name=candidate.full_name,
+                target_file="client.py",
+                pattern_type="missing_timeout",
+                failure_mode="A slow upstream endpoint can block the command forever instead of failing fast on a valid request path.",
+                evidence="The only HTTP call omits timeout=.",
+                patch_scope=1,
+                test_target="",
+                acceptance_score=score,
+                state="READY",
+            )
+            opportunity_id = store.create_opportunity(run_id, opportunity)
+            store.transition_opportunity(opportunity_id, "READY", "Ready but waiting on pacing.")
+        engine.finish_run(submitted=0, target=1, attempts=1, usage={"calls": 0, "est_tokens": 0}, log=__import__("logging").getLogger("test"))
+
+        report = engine.build_operator_report()
+
+        self.assertEqual(report.count("missing_timeout"), 1)
+        self.assertIn("Ready queue (1 shown)", report)
 
 
 if __name__ == "__main__":

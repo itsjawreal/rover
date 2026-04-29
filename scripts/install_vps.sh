@@ -262,20 +262,69 @@ choose_option() {
   local prompt="$1"
   shift
   local options=("$@")
-  local choice=""
-  printf '%s%s%s\n' "$C_BOLD" "$prompt" "$C_RESET" >&2
-  local i=1
-  for option in "${options[@]}"; do
-    printf '  %s%d)%s %s\n' "$C_BLUE" "$i" "$C_RESET" "$option" >&2
-    i=$((i + 1))
-  done
+  local selected=0
+  local key=""
+  local line_count="${#options[@]}"
+
+  if [ ! -t 0 ] || [ ! -t 1 ] || [ -n "${CI:-}" ]; then
+    printf '%s%s%s\n' "$C_BOLD" "$prompt" "$C_RESET" >&2
+    for option in "${options[@]}"; do
+      printf '  - %s\n' "$option" >&2
+    done
+    printf '%s' "1"
+    return 0
+  fi
+
+  _render_option_picker() {
+    local current="$1"
+    printf '\r' >&2
+    for _ in $(seq 1 "$line_count"); do
+      printf '\033[1A\033[2K' >&2
+    done
+    printf '%s%s%s\n' "$C_BOLD" "$prompt" "$C_RESET" >&2
+    local idx=0
+    for option in "${options[@]}"; do
+      if [ "$idx" -eq "$current" ]; then
+        printf '  %s›%s %s%s%s\n' "$C_GREEN" "$C_RESET" "$C_BOLD" "$option" "$C_RESET" >&2
+      else
+        printf '   %s\n' "$option" >&2
+      fi
+      idx=$((idx + 1))
+    done
+    printf '%s[hint]%s Use arrow keys, then press Enter.\n' "$C_MAGENTA" "$C_RESET" >&2
+  }
+
+  line_count=$((line_count + 2))
+  _render_option_picker "$selected"
   while true; do
-    read -r -p "Choice [1-${#options[@]}]: " choice >&2
-    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
-      printf '%s' "$choice"
-      return 0
-    fi
-    printf '%s[warn]%s Invalid choice. Please select a number between 1 and %d.\n' "$C_YELLOW" "$C_RESET" "${#options[@]}" >&2
+    IFS= read -rsn1 key
+    case "$key" in
+      "")
+        printf '%s' "$((selected + 1))"
+        printf '\n' >&2
+        return 0
+        ;;
+      $'\x1b')
+        IFS= read -rsn2 key || true
+        case "$key" in
+          "[A")
+            if [ "$selected" -gt 0 ]; then
+              selected=$((selected - 1))
+            else
+              selected=$((${#options[@]} - 1))
+            fi
+            ;;
+          "[B")
+            if [ "$selected" -lt $((${#options[@]} - 1)) ]; then
+              selected=$((selected + 1))
+            else
+              selected=0
+            fi
+            ;;
+        esac
+        _render_option_picker "$selected"
+        ;;
+    esac
   done
 }
 

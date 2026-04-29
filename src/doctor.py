@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.agent_models import get_runtime_profile, iter_agent_tool_support
+from src.cli_ui import box_title, bullet_block, key_value_block, table
 from src.config import (
     AI_BACKEND,
     CLAUDE_CMD,
@@ -17,6 +18,11 @@ from src.config import (
     TELEGRAM_CHAT,
     TELEGRAM_TOKEN,
 )
+
+OPENCLAW_ROOT = Path(os.getenv("OPENCLAW_HOME", "~/.openclaw")).expanduser()
+OPENCLAW_WORKSPACE_SKILL = OPENCLAW_ROOT / "workspace" / "skills" / "github-contribution-engine" / "SKILL.md"
+OPENCLAW_SHARED_SKILL = OPENCLAW_ROOT / "skills" / "github-contribution-engine" / "SKILL.md"
+OPENCLAW_WRAPPER = OPENCLAW_ROOT / "tools" / "contribution.py"
 
 
 @dataclass
@@ -239,6 +245,26 @@ def collect_doctor_checks() -> list[DoctorCheck]:
         )
     )
 
+    openclaw_skill_path = ""
+    if OPENCLAW_WORKSPACE_SKILL.exists():
+        openclaw_skill_path = str(OPENCLAW_WORKSPACE_SKILL)
+    elif OPENCLAW_SHARED_SKILL.exists():
+        openclaw_skill_path = str(OPENCLAW_SHARED_SKILL)
+    checks.append(
+        DoctorCheck(
+            "openclaw-skill",
+            "ok" if openclaw_skill_path else "warn",
+            openclaw_skill_path or "OpenClaw skill not installed for github-contribution-engine",
+        )
+    )
+    checks.append(
+        DoctorCheck(
+            "openclaw-wrapper",
+            "ok" if OPENCLAW_WRAPPER.exists() else "warn",
+            str(OPENCLAW_WRAPPER) if OPENCLAW_WRAPPER.exists() else "OpenClaw wrapper not installed at ~/.openclaw/tools/contribution.py",
+        )
+    )
+
     user_specific_path = any(
         marker in (os.getenv(name, "") or "")
         for name in ("CLAUDE_CMD", "CODEX_CMD")
@@ -259,27 +285,33 @@ def collect_doctor_checks() -> list[DoctorCheck]:
 def build_doctor_report() -> str:
     checks = collect_doctor_checks()
     runtime = get_runtime_profile()
-    lines = [
-        "Contribution Engine Doctor",
-        "==========================",
-        "",
-    ]
+    lines = [box_title("Contribution Engine Doctor"), ""]
     overall = "ok"
     counts = {"ok": 0, "warn": 0, "fail": 0}
+    check_rows: list[list[object]] = []
     for check in checks:
         if check.status == "fail":
             overall = "fail"
         elif check.status == "warn" and overall != "fail":
             overall = "warn"
         counts[check.status] = counts.get(check.status, 0) + 1
-        lines.append(f"{_status_badge(check.status)} {check.name}: {check.detail}")
+        check_rows.append([_status_badge(check.status), check.name, check.detail])
 
+    lines.append(table("Checks", ["Status", "Check", "Detail"], check_rows))
     lines.extend(
         [
             "",
-            f"Summary: ok={counts.get('ok', 0)} warn={counts.get('warn', 0)} fail={counts.get('fail', 0)}",
-            f"Overall: {overall.upper()}",
-            f"Active runtime: tool={runtime.agent_tool} backend={runtime.backend} support={runtime.support_level}",
+            "Summary:",
+            key_value_block(
+                "Summary",
+                [
+                    ("OK", counts.get("ok", 0)),
+                    ("Warn", counts.get("warn", 0)),
+                    ("Fail", counts.get("fail", 0)),
+                    ("Overall", overall.upper()),
+                    ("Active runtime", f"tool={runtime.agent_tool} backend={runtime.backend} support={runtime.support_level}"),
+                ],
+            ),
             "",
             "Operator readiness:",
         ]
@@ -289,13 +321,14 @@ def build_doctor_report() -> str:
     ai_ready = any(check.name in {"codex-cli", "claude-cli"} and check.status == "ok" for check in checks)
     selected_auth_ready = any(check.name == "selected-backend-auth" and check.status == "ok" for check in checks)
     if gh_ready and ai_ready and selected_auth_ready:
-        lines.append("- Ready for full contribution runs, including PR submission.")
+        readiness = ["Ready for full contribution runs, including PR submission."]
     elif ai_ready and selected_auth_ready:
-        lines.append("- Ready for local generation and inspect flows, but GitHub auth still needs attention.")
+        readiness = ["Ready for local generation and inspect flows, but GitHub auth still needs attention."]
     elif ai_ready:
-        lines.append("- Backend CLI is installed, but authentication is incomplete for the active runtime.")
+        readiness = ["Backend CLI is installed, but authentication is incomplete for the active runtime."]
     else:
-        lines.append("- Not ready for contribution generation until at least one supported AI CLI is available.")
+        readiness = ["Not ready for contribution generation until at least one supported AI CLI is available."]
+    lines.append(bullet_block("Operator readiness", readiness))
 
     actions: list[str] = []
     for check in checks:
@@ -313,23 +346,44 @@ def build_doctor_report() -> str:
             actions.append("Add `GITHUB_TOKEN` if you want the engine to make authenticated GitHub API calls.")
         elif check.name == "codex-auth" and check.status != "ok":
             actions.append("Finish Codex authentication with `codex login --device-auth`, `codex login`, or set `OPENAI_API_KEY`.")
+        elif check.name == "openclaw-skill" and check.status != "ok":
+            actions.append("Install the OpenClaw workspace skill so Telegram/OpenClaw can call the local contribution wrapper.")
+        elif check.name == "openclaw-wrapper" and check.status != "ok":
+            actions.append("Install the OpenClaw wrapper at `~/.openclaw/tools/contribution.py` so local agent commands can execute.")
 
     if actions:
-        lines.extend(["", "Recommended actions:"])
-        for action in actions:
-            lines.append(f"- {action}")
+        lines.extend(["", bullet_block("Recommended actions", actions)])
 
     lines.extend(
         [
             "",
             "Support matrix:",
-            "- Codex: tested default CLI path.",
-            "- Claude Code: supported fallback CLI path.",
-            "- OpenCode/Aider/Cline/Cursor/Windsurf/Other: label-only until a real backend adapter exists.",
+            table(
+                "Support matrix",
+                ["Tool family", "Support level", "Notes"],
+                [
+                    ["Codex", "tested", "default CLI path"],
+                    ["Claude Code", "supported", "fallback CLI path"],
+                    ["OpenCode/Aider/Cline/Cursor/Windsurf/Other", "label-only", "real backend adapter not installed"],
+                ],
+            ),
             "",
-            "Open-source readiness note:",
-            "- CLI-based Codex/Claude operation is supported now.",
-            "- API-key-only LLM mode is not implemented yet; treat that as a planned portability feature.",
+            bullet_block(
+                "Open-source readiness note",
+                [
+                    "CLI-based Codex/Claude operation is supported now.",
+                    "API-key-only LLM mode is not implemented yet; treat that as a planned portability feature.",
+                ],
+            ),
+            "",
+            "OpenClaw integration note:",
+            bullet_block(
+                "OpenClaw integration note",
+                [
+                    "Prefer the workspace skill at `~/.openclaw/workspace/skills/github-contribution-engine/SKILL.md` when OpenClaw uses a workspace.",
+                    "If Agent Pill still ignores the skill, check `agents.defaults.skills` / `agents.list[].skills` in `~/.openclaw/openclaw.json`.",
+                ],
+            ),
         ]
     )
     return "\n".join(lines)

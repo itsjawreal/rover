@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from src.cli_ui import box_title, bullet_block, key_value_block, table
 from src.contribution_store import ContributionStore
 
 
@@ -67,17 +68,28 @@ class ContributionEngine:
             return "No contribution engine runs recorded yet."
 
         latest = summaries[0] if summaries else {}
-        lines = [
-            "Contribution Engine Report",
-            "==========================",
-        ]
+        lines = [box_title("Contribution Engine Report")]
         if latest:
             submitted = latest.get("submitted", 0)
             target = latest.get("target", 0)
             attempts = latest.get("attempts", 0)
-            states = latest.get("state_counts", {})
-            headline = f"Latest run #{latest.get('run_id', '?')}: submitted {submitted}/{target} after {attempts} attempt(s)"
-            lines.extend(["", headline, f"States: {states}"])
+            states = ", ".join(f"{key}={value}" for key, value in latest.get("state_counts", {}).items()) or "-"
+            lines.extend(
+                [
+                    "",
+                    key_value_block(
+                        "Latest run",
+                        [
+                            ("Run", f"#{latest.get('run_id', '?')}"),
+                            ("Submitted", f"{submitted}/{target}"),
+                            ("Attempts", attempts),
+                            ("AI calls", latest.get("ai_calls", 0)),
+                            ("Estimated tokens", latest.get("est_tokens", 0)),
+                            ("States", states),
+                        ],
+                    ),
+                ]
+            )
             if latest.get("top_rejections"):
                 pretty_rejections = ", ".join(
                     f"{reason} x{count}" for reason, count in latest["top_rejections"][:3]
@@ -87,44 +99,61 @@ class ContributionEngine:
                 lines.append(f"Bottleneck: {latest['bottleneck']}")
 
         if summaries:
-            lines.append("")
-            lines.append("Recent runs:")
+            recent_rows: list[list[object]] = []
             for summary in summaries:
-                lines.append(
-                    "- run #{run_id}: submitted={submitted}/{target}, attempts={attempts}, "
-                    "ai_calls={ai_calls}, states={states}".format(
-                        run_id=summary.get("run_id", "?"),
-                        submitted=summary.get("submitted", 0),
-                        target=summary.get("target", 0),
-                        attempts=summary.get("attempts", 0),
-                        ai_calls=summary.get("ai_calls", 0),
-                        states=summary.get("state_counts", {}),
-                    )
+                recent_rows.append(
+                    [
+                        f"#{summary.get('run_id', '?')}",
+                        f"{summary.get('submitted', 0)}/{summary.get('target', 0)}",
+                        summary.get("attempts", 0),
+                        summary.get("ai_calls", 0),
+                        ", ".join(f"{k}={v}" for k, v in summary.get("state_counts", {}).items()) or "-",
+                    ]
                 )
-                if summary.get("bottleneck"):
-                    lines.append(f"  bottleneck: {summary['bottleneck']}")
+            lines.extend(
+                [
+                    "",
+                    table("Recent runs", ["Run", "Submitted", "Attempts", "AI calls", "States"], recent_rows),
+                ]
+            )
+            bottlenecks = [
+                f"run #{summary.get('run_id', '?')}: {summary['bottleneck']}"
+                for summary in summaries
+                if summary.get("bottleneck")
+            ]
+            if bottlenecks:
+                lines.extend(["", bullet_block("Run bottlenecks", bottlenecks)])
         if queued:
-            lines.append("")
-            lines.append(f"Ready queue ({len(queued)} shown):")
-            for opportunity in queued:
-                lines.append(
-                    "- #{id} {repo} {pattern} {file} score={score}".format(
-                        id=opportunity.get("id"),
-                        repo=opportunity.get("repo_full_name"),
-                        pattern=opportunity.get("pattern_type"),
-                        file=opportunity.get("target_file"),
-                        score=opportunity.get("acceptance_score"),
-                    )
-                )
+            queue_rows = [
+                [
+                    f"#{opportunity.get('id')}",
+                    opportunity.get("repo_full_name"),
+                    opportunity.get("pattern_type"),
+                    opportunity.get("target_file"),
+                    opportunity.get("acceptance_score"),
+                ]
+                for opportunity in queued
+            ]
+            lines.extend(
+                [
+                    "",
+                    table(
+                        f"Ready queue ({len(queued)} shown)",
+                        ["ID", "Repo", "Pattern", "File", "Score"],
+                        queue_rows,
+                    ),
+                ]
+            )
         lines.append("")
         lines.append("Suggested next step:")
         if queued:
-            lines.append("- Run `python -m app.builder --contrib --1` to consume the strongest queued opportunity.")
+            next_steps = ["Run `python -m app.builder --contrib --1` to consume the strongest queued opportunity."]
         elif latest.get("top_rejections"):
             top_reason = latest["top_rejections"][0][0]
-            lines.append(f"- Investigate rejection pattern `{top_reason}` before widening search or targeting larger repos.")
+            next_steps = [f"Investigate rejection pattern `{top_reason}` before widening search or targeting larger repos."]
         else:
-            lines.append("- Run `python -m app.builder --contrib --1` to start a new contribution cycle.")
+            next_steps = ["Run `python -m app.builder --contrib --1` to start a new contribution cycle."]
+        lines.append(bullet_block("Suggested next step", next_steps))
         return "\n".join(lines)
 
     def _log_summary(self, summary: dict, log: logging.Logger) -> None:

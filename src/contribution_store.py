@@ -621,7 +621,12 @@ class ContributionStore:
                 (run_id,),
             ).fetchall()
             queued_rows = conn.execute(
-                "SELECT repo_full_name, target_file, pattern_type FROM opportunities WHERE run_id = ? AND state = 'READY'",
+                """
+                SELECT repo_full_name, target_file, pattern_type, failure_mode, acceptance_score, updated_at
+                FROM opportunities
+                WHERE run_id = ? AND state = 'READY'
+                ORDER BY acceptance_score DESC, updated_at DESC
+                """,
                 (run_id,),
             ).fetchall()
             pr_rows = conn.execute(
@@ -640,7 +645,7 @@ class ContributionStore:
             ).fetchone()
         state_counts = {row["state"]: int(row["n"]) for row in state_rows}
         top_rejections = [(row["reason_code"], int(row["n"])) for row in rejection_rows[:5]]
-        queued = [dict(row) for row in queued_rows]
+        queued = self._dedupe_ready_rows(queued_rows)
         submitted_prs = [dict(row) for row in pr_rows]
         bottleneck = ""
         if top_rejections:
@@ -690,15 +695,32 @@ class ContributionStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, repo_full_name, target_file, pattern_type, acceptance_score, updated_at
+                SELECT id, repo_full_name, target_file, pattern_type, failure_mode, acceptance_score, updated_at
                 FROM opportunities
                 WHERE state = 'READY'
                 ORDER BY acceptance_score DESC, updated_at DESC
-                LIMIT ?
                 """,
-                (limit,),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return self._dedupe_ready_rows(rows, limit=limit)
+
+    def _dedupe_ready_rows(self, rows: list[sqlite3.Row], limit: int | None = None) -> list[dict]:
+        unique: list[dict] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for row in rows:
+            item = dict(row)
+            signature = (
+                item.get("repo_full_name", ""),
+                item.get("target_file", ""),
+                item.get("pattern_type", ""),
+                item.get("failure_mode", ""),
+            )
+            if signature in seen:
+                continue
+            seen.add(signature)
+            unique.append(item)
+            if limit is not None and len(unique) >= limit:
+                break
+        return unique
 
 
 PREngineStore = ContributionStore
