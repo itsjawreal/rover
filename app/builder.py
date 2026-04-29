@@ -304,6 +304,12 @@ def main(argv: list[str] | None = None) -> None:
     cleanup_old_logs()
     _apply_command_text(args, log)
 
+    if args.doctor:
+        print(build_doctor_report())
+        return
+    if args.contrib_report:
+        print(build_contribution_report())
+        return
     if args.repo_inspect:
         inspect_repo(args.repo_inspect, log)
         return

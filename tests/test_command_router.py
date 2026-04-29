@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import io
 import unittest
+from unittest import mock
 
+from app import builder
 from src.command_router import parse_command_text
 
 
@@ -41,3 +44,15 @@ class CommandRouterTests(unittest.TestCase):
 
         self.assertEqual(request.action, "contrib_targeted")
         self.assertFalse(request.dry_run)
+
+    def test_builder_command_text_doctor_prints_report(self) -> None:
+        with mock.patch("app.builder.build_doctor_report", return_value="DOCTOR_OK"):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                builder.main(["--command-text", "cek kesehatan contribution engine"])
+        self.assertIn("DOCTOR_OK", stdout.getvalue())
+
+    def test_builder_command_text_report_prints_report(self) -> None:
+        with mock.patch("app.builder.build_contribution_report", return_value="REPORT_OK"):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                builder.main(["--command-text", "tampilkan report kontribusi terakhir"])
+        self.assertIn("REPORT_OK", stdout.getvalue())
