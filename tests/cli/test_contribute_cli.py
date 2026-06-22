@@ -51,14 +51,14 @@ class ContributeCLITests(unittest.TestCase):
 
     def test_setup_routes_to_wsl_installer_when_windows_python_targets_wsl_repo(self) -> None:
         with mock.patch("app.contribute.os.name", "nt"), mock.patch(
-            "app.contribute._wsl_unc_info", return_value=("Ubuntu-20.04", "/home/nadira/project/rover")
+            "app.contribute._wsl_unc_info", return_value=("Ubuntu-20.04", "/home/user/project/rover")
         ), mock.patch(
             "app.contribute.subprocess.run"
         ) as mocked_run, mock.patch("sys.argv", ["rover", "setup"]):
             contribute.main()
 
         mocked_run.assert_called_once_with(
-            ["wsl.exe", "-d", "Ubuntu-20.04", "bash", "/home/nadira/project/rover/scripts/install_vps.sh"],
+            ["wsl.exe", "-d", "Ubuntu-20.04", "bash", "/home/user/project/rover/scripts/install_vps.sh"],
             check=False,
         )
 
@@ -77,14 +77,14 @@ class ContributeCLITests(unittest.TestCase):
 
     def test_uninstall_routes_to_wsl_uninstaller_when_windows_python_targets_wsl_repo(self) -> None:
         with mock.patch("app.contribute.os.name", "nt"), mock.patch(
-            "app.contribute._wsl_unc_info", return_value=("Ubuntu-20.04", "/home/nadira/project/rover")
+            "app.contribute._wsl_unc_info", return_value=("Ubuntu-20.04", "/home/user/project/rover")
         ), mock.patch(
             "app.contribute.subprocess.run"
         ) as mocked_run, mock.patch("sys.argv", ["rover", "uninstall"]):
             contribute.main()
 
         mocked_run.assert_called_once_with(
-            ["wsl.exe", "-d", "Ubuntu-20.04", "bash", "/home/nadira/project/rover/scripts/uninstall_vps.sh"],
+            ["wsl.exe", "-d", "Ubuntu-20.04", "bash", "/home/user/project/rover/scripts/uninstall_vps.sh"],
             check=False,
         )
 
@@ -130,7 +130,7 @@ class ContributeCLITests(unittest.TestCase):
 
     def test_targeted_repo_routes_to_wsl_runtime_when_windows_python_targets_wsl_repo(self) -> None:
         with mock.patch("app.contribute.os.name", "nt"), mock.patch(
-            "app.contribute._wsl_unc_info", return_value=("Ubuntu-20.04", "/home/nadira/project/rover")
+            "app.contribute._wsl_unc_info", return_value=("Ubuntu-20.04", "/home/user/project/rover")
         ), mock.patch(
             "app.contribute.subprocess.run"
         ) as mocked_run, mock.patch("sys.argv", ["rover", "example/project"]):
@@ -143,7 +143,7 @@ class ContributeCLITests(unittest.TestCase):
                 "Ubuntu-20.04",
                 "bash",
                 "-lc",
-                "cd /home/nadira/project/rover && python3 -m app.contribute example/project",
+                "cd /home/user/project/rover && python3 -m app.contribute example/project",
             ],
             check=False,
         )

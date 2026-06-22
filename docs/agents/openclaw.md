@@ -57,7 +57,7 @@ export OPENROUTER_API_KEY=sk-or-...   # in ~/.bashrc / ~/.profile; both tools re
 Recommended install command:
 
 ```powershell
-uv tool install git+https://github.com/BigNounce90/rover.git
+uv tool install git+https://github.com/itsjawreal/rover.git
 ```
 
 Verify the installed commands:

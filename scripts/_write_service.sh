@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-PROJECT=/home/nadira/project/rover
+# Repo root: auto-detected from this script's location, overridable via PROJECT env var.
+PROJECT="${PROJECT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SERVICE_FILE=$HOME/.config/systemd/user/rover-mcp.service
 LOG_DIR=$PROJECT/logs
 DAEMON_BIN=$HOME/.local/bin/rover-daemon

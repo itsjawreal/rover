@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-git clone https://github.com/BigNounce90/rover.git
+git clone https://github.com/itsjawreal/rover.git
 cd rover
 pip install -r requirements.txt
 cp .env.example .env          # fill in GITHUB_TOKEN and GITHUB_OWNER

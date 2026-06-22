@@ -26,8 +26,8 @@ rover-mcp = "src.contribution_mcp.server:main"
 rover-daemon = "src.daemon.runner:main"
 
 [project.urls]
-Homepage = "https://github.com/BigNounce90/rover"
-Repository = "https://github.com/BigNounce90/rover"
+Homepage = "https://github.com/itsjawreal/rover"
+Repository = "https://github.com/itsjawreal/rover"
 
 [build-system]
 requires = ["hatchling"]

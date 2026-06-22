@@ -395,11 +395,11 @@ class PRGeneratorHardeningTests(unittest.TestCase):
 
     def test_delete_fork_skips_target_repo_itself(self) -> None:
         entry = {
-            "full_name": "BigNounce90/wallet-mcp",
-            "fork_name": "BigNounce90/wallet-mcp",
+            "full_name": "itsjawreal/wallet-mcp",
+            "fork_name": "itsjawreal/wallet-mcp",
         }
 
-        with patch("src.github.fork.get_current_github_login", return_value="BigNounce90"), \
+        with patch("src.github.fork.get_current_github_login", return_value="itsjawreal"), \
              patch("subprocess.run") as mocked_run:
             _delete_fork(entry, logging.getLogger("test"))
 

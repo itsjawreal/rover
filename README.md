@@ -1,6 +1,6 @@
 # Rover
 
-[![CI](https://github.com/BigNounce90/rover/actions/workflows/ci.yml/badge.svg)](https://github.com/BigNounce90/rover/actions/workflows/ci.yml)
+[![CI](https://github.com/itsjawreal/rover/actions/workflows/ci.yml/badge.svg)](https://github.com/itsjawreal/rover/actions/workflows/ci.yml)
 
 > A learning project: a GitHub contribution engine that scans repos, drafts focused patches, runs them through quality gates, and leaves the submit decision to a human.
 
@@ -234,7 +234,7 @@ powershell -ExecutionPolicy Bypass -File scripts/uninstall_windows.ps1
 One-line bootstrap from a fresh server:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BigNounce90/rover/master/scripts/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/itsjawreal/rover/master/scripts/bootstrap.sh | bash
 ```
 
 The guided setup can also install a native OpenClaw skill + wrapper in one flow:
@@ -415,7 +415,7 @@ python -m app.builder --install-openclaw
 Installable path:
 
 ```bash
-uv tool install git+https://github.com/BigNounce90/rover.git
+uv tool install git+https://github.com/itsjawreal/rover.git
 ```
 
 After install, the MCP entrypoint becomes:
@@ -439,7 +439,7 @@ MCP config for Claude Desktop or other MCP clients (installed via `uv`):
       "command": "uv",
       "args": [
         "tool", "run",
-        "--from", "git+https://github.com/BigNounce90/rover.git",
+        "--from", "git+https://github.com/itsjawreal/rover.git",
         "rover-mcp"
       ]
     }
@@ -455,7 +455,7 @@ MCP config for local WSL installs (already provided in `.mcp.json`):
     "rover": {
       "command": "wsl",
       "args": ["-d", "Ubuntu-20.04", "--", "bash", "-c",
-               "cd /home/nadira/project/rover && python3 -m src.contribution_mcp.server"],
+               "cd /path/to/rover && python3 -m src.contribution_mcp.server"],
       "type": "stdio"
     }
   }

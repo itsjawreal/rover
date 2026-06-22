@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-git@github.com:BigNounce90/rover.git}"
-HTTPS_REPO_URL="${HTTPS_REPO_URL:-https://github.com/BigNounce90/rover.git}"
+REPO_URL="${REPO_URL:-git@github.com:itsjawreal/rover.git}"
+HTTPS_REPO_URL="${HTTPS_REPO_URL:-https://github.com/itsjawreal/rover.git}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/rover}"
 
 log() {

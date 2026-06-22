@@ -24,8 +24,8 @@ def _cp(returncode: int, stdout: str = "", stderr: str = "") -> subprocess.Compl
 
 class ForkSubmissionTests(unittest.TestCase):
     def test_get_current_github_login_prefers_env_override(self) -> None:
-        with patch.dict(os.environ, {"GITHUB_OWNER": "BigNounce90"}, clear=False):
-            self.assertEqual(get_current_github_login(), "BigNounce90")
+        with patch.dict(os.environ, {"GITHUB_OWNER": "itsjawreal"}, clear=False):
+            self.assertEqual(get_current_github_login(), "itsjawreal")
 
     def test_get_current_github_login_falls_back_to_auth_status_account_name(self) -> None:
         responses = [
@@ -34,15 +34,17 @@ class ForkSubmissionTests(unittest.TestCase):
                 1,
                 stderr=(
                     "github.com\n"
-                    "  X Failed to log in to github.com account BigNounce90 (keyring)\n"
+                    "  X Failed to log in to github.com account itsjawreal (keyring)\n"
                     "  - Active account: true\n"
                     "  - The token in keyring is invalid.\n"
                 ),
             ),
         ]
 
-        with patch.dict(os.environ, {}, clear=True), patch("src.github.fork._run", side_effect=responses):
-            self.assertEqual(get_current_github_login(), "BigNounce90")
+        with patch.dict(os.environ, {}, clear=True), \
+                patch("dotenv.dotenv_values", return_value={}), \
+                patch("src.github.fork._run", side_effect=responses):
+            self.assertEqual(get_current_github_login(), "itsjawreal")
 
     def test_wait_for_fork_ready_retries_until_repo_is_visible(self) -> None:
         responses = [
