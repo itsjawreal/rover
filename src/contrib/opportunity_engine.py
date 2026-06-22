@@ -10,6 +10,13 @@ from src.github.scraper import RepoCandidate
 
 # ── Constants ────────────────────────────────────────────────
 MAX_TARGET_FILE_LINES = int(os.getenv("PR_MAX_TARGET_FILE_LINES", "400"))
+# A large file may still host a tightly-scoped fix. When the evidence sits inside
+# a small function, the patch is narrow regardless of total file size, so the
+# whole-file breadth gate is overridden — but only up to a hard file-size cap so
+# pathologically large files still cost no AI. Downstream diff-size/patch-shape
+# gates measure the actual patch breadth precisely.
+MAX_LOCAL_SCOPE_LINES = int(os.getenv("PR_MAX_LOCAL_SCOPE_LINES", "60"))
+LOCALITY_FILE_CAP_FACTOR = int(os.getenv("PR_LOCALITY_FILE_CAP_FACTOR", "3"))
 QUALIFY_MIN_SCORE = int(os.getenv("PR_QUALIFY_MIN_SCORE", "70"))
 FEATURE_QUALIFY_MIN_SCORE = int(os.getenv("PR_FEATURE_QUALIFY_MIN_SCORE", "82"))
 VAGUE_MARKERS = (
@@ -545,6 +552,43 @@ class PatternScanner:
 
 
 # ── Qualification ────────────────────────────────────────────
+def _local_scope_lines(content: str, opportunity: Opportunity) -> int | None:
+    """Lines spanned by the smallest function enclosing the evidence line.
+
+    Returns None when the evidence is module-level (no enclosing function),
+    unknown, or the file is unparseable — callers treat None as "cannot prove
+    locality" and keep the broad-file rejection. A small returned value means the
+    fix is tightly scoped even if the whole file is large.
+    """
+    if not opportunity.evidence_lines:
+        return None
+    line_no = opportunity.evidence_lines[0]
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError):
+        return None
+    best: int | None = None
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        end = getattr(node, "end_lineno", None)
+        if end is None:
+            continue
+        if node.lineno <= line_no <= end:
+            span = end - node.lineno + 1
+            if best is None or span < best:
+                best = span
+    return best
+
+
+def _fix_is_localized(content: str, line_count: int, opportunity: Opportunity) -> bool:
+    """True if the evidence sits in a small function inside a not-absurdly-large file."""
+    if line_count > MAX_TARGET_FILE_LINES * LOCALITY_FILE_CAP_FACTOR:
+        return False
+    local_scope = _local_scope_lines(content, opportunity)
+    return local_scope is not None and local_scope <= MAX_LOCAL_SCOPE_LINES
+
+
 def qualify_opportunity(candidate: RepoCandidate, opportunity: Opportunity) -> QualificationResult:
     content = candidate.files.get(opportunity.target_file, "")
     if not content:
@@ -554,7 +598,7 @@ def qualify_opportunity(candidate: RepoCandidate, opportunity: Opportunity) -> Q
         return QualificationResult(False, "patch_scope_too_wide", "Patch scope exceeds the engine limit of two files.", opportunity.acceptance_score)
 
     line_count = _line_count(content)
-    if line_count > MAX_TARGET_FILE_LINES:
+    if line_count > MAX_TARGET_FILE_LINES and not _fix_is_localized(content, line_count, opportunity):
         return QualificationResult(False, "target_area_too_broad", "Target file is too large for a narrow acceptance-first PR.", opportunity.acceptance_score)
 
     combined = f"{opportunity.failure_mode} {opportunity.evidence}".lower()
@@ -566,7 +610,12 @@ def qualify_opportunity(candidate: RepoCandidate, opportunity: Opportunity) -> Q
 
     score = opportunity.acceptance_score
     normalized_target = opportunity.target_file.replace("\\", "/")
-    if opportunity.opportunity_kind == "bugfix" and CORE_ENTRYPOINT_RE.search(normalized_target) and line_count > 180:
+    if (
+        opportunity.opportunity_kind == "bugfix"
+        and CORE_ENTRYPOINT_RE.search(normalized_target)
+        and line_count > 180
+        and not _fix_is_localized(content, line_count, opportunity)
+    ):
         return QualificationResult(False, "target_area_too_broad", "Core entrypoint target is too large for a narrow acceptance-first PR.", score)
     preferred_test_root = _preferred_test_root(candidate.files, opportunity.target_file)
     if opportunity.test_target and preferred_test_root:

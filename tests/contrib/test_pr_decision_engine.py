@@ -171,6 +171,49 @@ class QualificationTests(unittest.TestCase):
         self.assertFalse(result.accepted)
         self.assertEqual(result.reason_code, "target_area_too_broad")
 
+    def test_accepts_localized_fix_in_large_file(self) -> None:
+        filler = "\n".join(f"CONST_{i} = {i}" for i in range(450))
+        big = filler + "\n\ndef fetch():\n    import requests\n    return requests.get('https://api.example.com').json()\n"
+        candidate = _candidate({"client_big.py": big})
+        opportunity = Opportunity(
+            repo_full_name=candidate.full_name,
+            target_file="client_big.py",
+            pattern_type="missing_timeout",
+            failure_mode="A slow upstream endpoint can block the command forever instead of failing fast on a valid request path.",
+            evidence="The only HTTP call omits timeout= and sits in a small fetch() helper.",
+            patch_scope=1,
+            test_target="",
+            acceptance_score=99,
+            evidence_lines=[454],
+        )
+
+        result = qualify_opportunity(candidate, opportunity)
+
+        # File is >400 lines, but the fix lives in a 3-line function — narrow.
+        self.assertTrue(result.accepted)
+
+    def test_rejects_localized_fix_when_file_exceeds_hard_cap(self) -> None:
+        filler = "\n".join(f"CONST_{i} = {i}" for i in range(1300))
+        huge = filler + "\n\ndef fetch():\n    import requests\n    return requests.get('https://api.example.com').json()\n"
+        candidate = _candidate({"client_huge.py": huge})
+        opportunity = Opportunity(
+            repo_full_name=candidate.full_name,
+            target_file="client_huge.py",
+            pattern_type="missing_timeout",
+            failure_mode="A slow upstream endpoint can block the command forever instead of failing fast on a valid request path.",
+            evidence="The only HTTP call omits timeout= and sits in a small fetch() helper.",
+            patch_scope=1,
+            test_target="",
+            acceptance_score=99,
+            evidence_lines=[1304],
+        )
+
+        result = qualify_opportunity(candidate, opportunity)
+
+        # Localized, but the file is past the hard size cap — keep the rejection.
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.reason_code, "target_area_too_broad")
+
     def test_accepts_maintainer_signaled_feature_upgrade(self) -> None:
         candidate = _candidate(
             {
