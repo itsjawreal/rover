@@ -44,3 +44,7 @@ venv/
 
 # build artifact, do not track
 *.zip
+
+# internal planning scratch — kept locally, not part of the public repo
+newplan.md
+docs/validation/
