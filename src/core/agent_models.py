@@ -8,6 +8,7 @@ from src.core.config import AGENT_TOOL, AI_BACKEND, MODEL_SERIES
 SUPPORTED_AGENT_TOOLS = [
     "Codex",
     "Claude Code",
+    "OpenRouter",
     "OpenCode",
     "Aider",
     "Cline",
@@ -58,6 +59,12 @@ AGENT_TOOL_SUPPORT = {
         backend_family="claude-cli",
         note="Supported fallback path for operators who choose Claude CLI.",
     ),
+    "OpenRouter": AgentToolSupport(
+        name="OpenRouter",
+        support_level="supported",
+        backend_family="openrouter-api",
+        note="OpenAI-compatible HTTP backend (OpenRouter and similar); no CLI needed.",
+    ),
     "OpenCode": AgentToolSupport(
         name="OpenCode",
         support_level="label-only",
@@ -101,6 +108,8 @@ def get_backend_label(ai_backend: str | None = None) -> str:
     selected = (ai_backend or AI_BACKEND or "codex").strip().lower()
     if selected == "claude":
         return "claude-cli"
+    if selected == "openrouter":
+        return "openrouter-api"
     return "codex-cli"
 
 

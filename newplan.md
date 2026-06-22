@@ -525,7 +525,7 @@ Goal:
 
 ---
 
-### [ ] 16. AST-based scanner (ganti regex di PatternScanner)
+### [x] 16. AST-based scanner (ganti regex di PatternScanner)
 
 **Problem sekarang:** `PatternScanner` di `opportunity_engine.py` pakai regex murni. Ini menyebabkan:
 
@@ -606,7 +606,7 @@ Goal:
 
 ---
 
-### [ ] 18. Multi-turn repair loop (Agentless / Devin style)
+### [x] 18. Multi-turn repair loop (Agentless / Devin style)
 
 **Problem sekarang:** Max 1 retry (item 13). Devin bisa iterate 10+ kali. Agentless pakai loop: localize → patch → test → repair → test.
 
@@ -645,7 +645,7 @@ Goal:
 
 ---
 
-### [ ] 19. PR revision otomatis dari maintainer comment
+### [x] 19. PR revision otomatis dari maintainer comment
 
 **Problem sekarang:** Setelah PR submitted dan maintainer comment, Rover bisa `contrib_check` dan `contrib_respond` — tapi hanya generate teks balasan, tidak push code revision. PR akhirnya di-close tanpa merge.
 

@@ -321,16 +321,38 @@ CODEX_ARGS = _split_args(
 if CODEX_ARGS == ["-p", "-"]:
     CODEX_ARGS = ["exec", "--skip-git-repo-check", "-s", "read-only", "-"]
 
+# ── OpenRouter / OpenAI-compatible HTTP backend (AI_BACKEND=openrouter) ──
+# Works with any OpenAI-compatible chat-completions endpoint: point
+# OPENROUTER_BASE_URL at OpenRouter (default), 9router, OpenAI, or a local server.
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "").strip()
+OPENROUTER_BASE_URL = (
+    os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").strip().rstrip("/")
+)
+
 
 def _default_agent_tool() -> str:
     if AI_BACKEND == "claude":
         return "Claude Code"
+    if AI_BACKEND == "openrouter":
+        return "OpenRouter"
     return "Codex"
 
 
 def _default_model_series() -> str:
     if AI_BACKEND == "claude":
         return "Claude"
+    if AI_BACKEND == "openrouter":
+        model = OPENROUTER_MODEL.lower()
+        if "claude" in model:
+            return "Claude"
+        if "deepseek" in model:
+            return "DeepSeek"
+        if "gemini" in model:
+            return "Gemini"
+        if "gpt" in model or "openai" in model:
+            return "GPT"
+        return "Other"
     return "GPT"
 
 
@@ -373,6 +395,8 @@ ROVER_NOTIFY_ON_EVENT_TYPES = _env_csv(
     ("started", "repo_selected", "stage", "patch_generated", "pr_submitted", "completed", "failed", "stalled"),
 )
 ROVER_NOTIFY_MAX_MESSAGE_CHARS = _env_int("ROVER_NOTIFY_MAX_MESSAGE_CHARS", 3500, minimum=200)
+PR_MONITOR_INTERVAL_SECONDS = _env_int("PR_MONITOR_INTERVAL_SECONDS", 0, minimum=0)
+TELEGRAM_BOT_ENABLED = _env_bool("TELEGRAM_BOT_ENABLED", False)
 
 
 # ── Error classification ─────────────────────────────────────

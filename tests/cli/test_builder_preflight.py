@@ -100,7 +100,9 @@ class BuilderTargetPreflightTests(unittest.TestCase):
         ):
             builder.run_contribution_mode(args, logging.getLogger("test"))
 
-        mocked_fetch.assert_called_once_with("example/project", logging.getLogger("test"), override_limits=True)
+        mocked_fetch.assert_called_once_with(
+            "example/project", logging.getLogger("test"), override_limits=True, status_cb=mock.ANY
+        )
 
     def test_human_approval_without_tty_queues_before_submit(self) -> None:
         args = argparse.Namespace(

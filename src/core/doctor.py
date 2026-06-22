@@ -17,6 +17,8 @@ from src.core.config import (
     CODEX_CMD,
     CODEX_CMD_RESOLUTION,
     ENV_FILE,
+    OPENROUTER_API_KEY,
+    OPENROUTER_MODEL,
     OPENCLAW_CMD,
     OPENCLAW_CMD_RESOLUTION,
     OPENCLAW_NOTIFY_ACCOUNT,
@@ -433,10 +435,20 @@ def collect_doctor_checks() -> list[DoctorCheck]:
     checks.append(
         DoctorCheck(
             "ai-backend",
-            "ok" if AI_BACKEND in {"codex", "claude"} else "warn",
+            "ok" if AI_BACKEND in {"codex", "claude", "openrouter"} else "warn",
             f"configured backend={AI_BACKEND} runtime={runtime.backend}",
         )
     )
+
+    if AI_BACKEND == "openrouter":
+        from src.core.config import OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_BASE_URL
+        if OPENROUTER_API_KEY and OPENROUTER_MODEL:
+            or_status, or_detail = "ok", f"key set, model={OPENROUTER_MODEL}, base={OPENROUTER_BASE_URL}"
+        elif OPENROUTER_API_KEY:
+            or_status, or_detail = "warn", "OPENROUTER_API_KEY set but OPENROUTER_MODEL is empty"
+        else:
+            or_status, or_detail = "fail", "OPENROUTER_API_KEY is not set"
+        checks.append(DoctorCheck("openrouter-api", or_status, or_detail))
 
     codex_ok = _command_exists(CODEX_CMD)
     claude_ok = _command_exists(CLAUDE_CMD)
@@ -455,7 +467,13 @@ def collect_doctor_checks() -> list[DoctorCheck]:
         )
     )
 
-    selected_backend_ok = claude_ok if runtime.backend == "claude-cli" else codex_ok
+    openrouter_ok = bool(OPENROUTER_API_KEY and OPENROUTER_MODEL)
+    if runtime.backend == "openrouter-api":
+        selected_backend_ok = openrouter_ok
+    elif runtime.backend == "claude-cli":
+        selected_backend_ok = claude_ok
+    else:
+        selected_backend_ok = codex_ok
     codex_auth_ok, codex_auth_detail = _codex_auth_ready()
     checks.append(
         DoctorCheck(
@@ -638,7 +656,7 @@ def build_doctor_report() -> str:
         any(check.name == "github-cli" and check.status == "ok" for check in checks)
         and any(check.name == "github-token" and check.status == "ok" for check in checks)
     )
-    ai_ready = any(check.name in {"codex-cli", "claude-cli"} and check.status == "ok" for check in checks)
+    ai_ready = any(check.name in {"codex-cli", "claude-cli", "openrouter-api"} and check.status == "ok" for check in checks)
     selected_auth_ready = any(check.name == "selected-backend-auth" and check.status == "ok" for check in checks)
     if gh_ready and ai_ready and selected_auth_ready:
         readiness = ["Ready for full contribution runs, including PR submission."]

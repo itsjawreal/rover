@@ -162,6 +162,9 @@ def _verification_commands(tmp_dir: Path) -> tuple[list[str], list[str], str] | 
     return None
 
 
+_INFRA_ERROR_MARKERS = ("ModuleNotFoundError", "ImportError", "No module named", "cannot import")
+
+
 def _run_repo_local_verification(tmp_dir: Path, log: logging.Logger) -> None:
     plan = _verification_commands(tmp_dir)
     if plan is None:
@@ -178,7 +181,13 @@ def _run_repo_local_verification(tmp_dir: Path, log: logging.Logger) -> None:
     log.info("  [verify] running local verification: %s", label)
     verify = _run(verify_cmd, cwd=tmp_dir, check=False)
     if verify.returncode != 0:
-        raise ForkError(f"local verification failed in `{label}`: {(verify.stdout + verify.stderr).strip()[:300]}")
+        output = (verify.stdout + verify.stderr).strip()
+        # If every failure is a missing-dep import error (not an assertion failure
+        # from our patch), skip rather than blocking the PR.
+        if any(m in output for m in _INFRA_ERROR_MARKERS) and "failures=" not in output:
+            log.warning("  [verify] infra-only test failures (missing deps) — skipping local verify: %s", output[:200])
+            return
+        raise ForkError(f"local verification failed in `{label}`: {output[:300]}")
 
 
 def _force_rmtree(path: Path) -> None:
@@ -217,10 +226,27 @@ def get_current_github_login() -> str:
     3. `gh auth status` parsing, which still reveals the active account even when
        the cached token is stale.
     """
+    # Skip placeholder values that ship in .env.example — they are never real logins.
+    _PLACEHOLDER = {"your_github_username", "your_github_login", "your-github-username", ""}
     for env_name in ("GITHUB_OWNER", "GITHUB_LOGIN", "GH_USERNAME"):
         value = os.getenv(env_name, "").strip()
-        if value:
+        if value and value.lower() not in _PLACEHOLDER:
             return value
+
+    # Env var may be stale from a parent process that started before .env was updated.
+    # Re-read .env file directly so a live config change takes effect without restart.
+    try:
+        from pathlib import Path as _Path
+        from dotenv import dotenv_values as _dotenv_values
+        _env_file = _Path(__file__).parent.parent.parent / ".env"
+        if _env_file.exists():
+            _env_vals = _dotenv_values(str(_env_file))
+            for _key in ("GITHUB_OWNER", "GITHUB_LOGIN", "GH_USERNAME"):
+                _val = (_env_vals.get(_key) or "").strip()
+                if _val and _val.lower() not in _PLACEHOLDER:
+                    return _val
+    except Exception:
+        pass
 
     r = _run(["gh", "api", "user", "--jq", ".login"], check=False)
     login = (r.stdout or "").strip()

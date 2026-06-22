@@ -36,7 +36,7 @@ class AgentModelSupportTests(unittest.TestCase):
         self.assertTrue(profile.support_level)
 
     def test_backend_label_matches_supported_defaults(self) -> None:
-        self.assertIn(get_backend_label(), {"codex-cli", "claude-cli"})
+        self.assertIn(get_backend_label(), {"codex-cli", "claude-cli", "openrouter-api"})
 
     def test_agent_tool_support_levels_are_honest(self) -> None:
         self.assertEqual(get_agent_tool_support("Codex").support_level, "tested")

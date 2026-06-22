@@ -591,6 +591,56 @@ class PRGeneratorHardeningTests(unittest.TestCase):
         self.assertIn("kill switch engaged", str(ctx.exception))
         self.assertEqual(mocked_ai.call_count, 2)
 
+    def test_targeted_structural_retry_rejects_after_repeated_wrong_target_patch(self) -> None:
+        candidate = RepoCandidate(
+            name="sample",
+            full_name="example/sample",
+            description="Sample repo",
+            stars=10,
+            forks=2,
+            license="MIT",
+            url="https://github.com/example/sample",
+            default_branch="main",
+            pushed_days_ago=1,
+            topics=["python"],
+            files={"sample.py": "def run():\n    return 1\n"},
+        )
+        ai_json = (
+            '{"improvement_type":"bug_fix","pr_title":"fix: wrong file",'
+            '"pr_body":"## Summary\\nFix bug\\n## Why it matters\\nPrevents crash.\\n## Testing\\nAdded regression coverage.",'
+            '"rationale":"Prevents crash.",'
+            '"safety_proof":"The change only affects the failing path.",'
+            '"changed_files":{"other.py":"def run():\\n    return 2\\n"}}'
+        )
+        retry_ai_json = ai_json.replace("fix: wrong file", "fix: alternate wrong file")
+        opportunity = Opportunity(
+            repo_full_name=candidate.full_name,
+            target_file="sample.py",
+            pattern_type="missing_input_validation",
+            failure_mode="callers receive stale data on a valid invocation.",
+            evidence="the function body returns a hard-coded stale value",
+            patch_scope=1,
+            test_target="tests/test_sample.py",
+            acceptance_score=90,
+        )
+        plan = (
+            '{"target_file":"sample.py","failure_mode":"stale value on valid invocation",'
+            '"expected_files":["sample.py","other.py"],'
+            '"test_target":"tests/test_sample.py","why_narrow":"single function fix in one local branch only",'
+            '"proof_path":"assert valid invocation returns updated value"}'
+        )
+
+        with patch("src.contrib.pr_generator.generate_dep_update", return_value=None), \
+             patch("src.contrib.pr_generator._recent_pr_recon", return_value={}), \
+             patch("src.contrib.pr_generator.fetch_file_git_history", return_value=[]), \
+             patch("src.contrib.pr_generator._discover_opportunities", return_value=(opportunity, 123)), \
+             patch("src.contrib.pr_generator.call_ai", side_effect=[plan, ai_json, retry_ai_json]) as mocked_ai:
+            with self.assertRaises(PRGeneratorError) as ctx:
+                generate_pr_improvement(candidate, logging.getLogger("test"), targeted_mode=True)
+
+        self.assertIn("Structural review rejected this target repeatedly", str(ctx.exception))
+        self.assertEqual(mocked_ai.call_count, 3)
+
     def test_self_review_layout_rejects_wrong_test_root(self) -> None:
         candidate = RepoCandidate(
             name="sample",
@@ -955,11 +1005,16 @@ class PRGeneratorHardeningTests(unittest.TestCase):
 
         with patch("src.contrib.pr_generator._ENGINE_STORE", store), \
              patch("src.contrib.pr_generator._ACTIVE_RUN_ID", run_id), \
+             patch("src.contrib.pr_generator.fetch_maintainer_signals", return_value={}), \
+             patch("src.contrib.pr_generator._discover_issue_backed_bugfixes", return_value=[]), \
              patch("src.contrib.pr_generator._PATTERN_SCANNER.scan", return_value=[opportunity]):
             with self.assertRaises(PRGeneratorError) as ctx:
                 _discover_opportunities(candidate, logging.getLogger("test"), goal="bugfix", targeted_mode=True)
 
-        self.assertIn("unchecked_response_shape:target_area_too_broad", str(ctx.exception))
+        # The targeted shortlist now rejects weak core candidates via the
+        # patchability-threshold gate (before any AI call) rather than the older
+        # per-pattern "target_area_too_broad" message.
+        self.assertIn("patchability threshold", str(ctx.exception))
 
     def test_targeted_overbroad_exception_handling_rejects_policy_surface(self) -> None:
         store = self._make_store()

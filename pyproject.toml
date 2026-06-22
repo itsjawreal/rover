@@ -23,6 +23,7 @@ dependencies = [
 rover = "app.contribute:main"
 rover-engine = "app.builder:main"
 rover-mcp = "src.contribution_mcp.server:main"
+rover-daemon = "src.daemon.runner:main"
 
 [project.urls]
 Homepage = "https://github.com/BigNounce90/rover"

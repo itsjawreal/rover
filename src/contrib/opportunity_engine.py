@@ -177,26 +177,39 @@ def _pattern_bonus(pattern_type: str) -> int:
 
 # ── Pattern scanner ──────────────────────────────────────────
 class PatternScanner:
-    def scan(self, candidate: RepoCandidate) -> list[Opportunity]:
+    def scan(self, candidate: RepoCandidate, excluded_patterns: set[str] | None = None) -> list[Opportunity]:
         opportunities: list[Opportunity] = []
         files = candidate.files
         base_bonus = 8 if has_tests(files) else -4
+        skip = excluded_patterns or set()
 
         for path, content in files.items():
             if not path.endswith((".py", ".ts", ".tsx")):
                 continue
-            opportunities.extend(self._scan_missing_timeout(candidate, path, content, base_bonus, files))
-            opportunities.extend(self._scan_unchecked_response_shape(candidate, path, content, base_bonus, files))
-            opportunities.extend(self._scan_unsafe_file_write(candidate, path, content, base_bonus, files))
-            opportunities.extend(self._scan_overbroad_exception(candidate, path, content, base_bonus, files))
-            opportunities.extend(self._scan_missing_input_validation(candidate, path, content, base_bonus, files))
-            opportunities.extend(self._scan_resource_cleanup_gap(candidate, path, content, base_bonus, files))
-            opportunities.extend(self._scan_missing_regression_test(candidate, path, content, base_bonus, files))
-            opportunities.extend(self._scan_feature_upgrade_todo(candidate, path, content, base_bonus, files))
-            opportunities.extend(self._scan_missing_retry_backoff(candidate, path, content, base_bonus, files))
-            opportunities.extend(self._scan_unsafe_subprocess(candidate, path, content, base_bonus, files))
-            opportunities.extend(self._scan_temp_file_cleanup(candidate, path, content, base_bonus, files))
-            opportunities.extend(self._scan_flaky_time_dependent_test(candidate, path, content, base_bonus, files))
+            if "missing_timeout" not in skip:
+                opportunities.extend(self._scan_missing_timeout(candidate, path, content, base_bonus, files))
+            if "unchecked_response_shape" not in skip:
+                opportunities.extend(self._scan_unchecked_response_shape(candidate, path, content, base_bonus, files))
+            if "unsafe_file_write" not in skip:
+                opportunities.extend(self._scan_unsafe_file_write(candidate, path, content, base_bonus, files))
+            if "overbroad_exception_handling" not in skip:
+                opportunities.extend(self._scan_overbroad_exception(candidate, path, content, base_bonus, files))
+            if "missing_input_validation" not in skip:
+                opportunities.extend(self._scan_missing_input_validation(candidate, path, content, base_bonus, files))
+            if "resource_cleanup_gap" not in skip:
+                opportunities.extend(self._scan_resource_cleanup_gap(candidate, path, content, base_bonus, files))
+            if "missing_regression_test_for_obvious_bugfix" not in skip:
+                opportunities.extend(self._scan_missing_regression_test(candidate, path, content, base_bonus, files))
+            if "feature_upgrade_todo" not in skip:
+                opportunities.extend(self._scan_feature_upgrade_todo(candidate, path, content, base_bonus, files))
+            if "missing_retry_backoff" not in skip:
+                opportunities.extend(self._scan_missing_retry_backoff(candidate, path, content, base_bonus, files))
+            if "unsafe_subprocess" not in skip:
+                opportunities.extend(self._scan_unsafe_subprocess(candidate, path, content, base_bonus, files))
+            if "temp_file_cleanup" not in skip:
+                opportunities.extend(self._scan_temp_file_cleanup(candidate, path, content, base_bonus, files))
+            if "flaky_time_dependent_test" not in skip:
+                opportunities.extend(self._scan_flaky_time_dependent_test(candidate, path, content, base_bonus, files))
         return self._dedupe(opportunities)
 
     def _dedupe(self, opportunities: list[Opportunity]) -> list[Opportunity]:
@@ -327,22 +340,39 @@ class PatternScanner:
         base_bonus: int,
         files: dict[str, str],
     ) -> list[Opportunity]:
-        opportunities: list[Opportunity] = []
-        lines = content.splitlines()
-        for idx, line in enumerate(lines):
-            if "except Exception" not in line and line.strip() != "except:":
+        if not path.endswith(".py"):
+            return []
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return []
+        _LOG_ATTRS = {"debug", "info", "warning", "warn", "error", "exception", "critical"}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler):
                 continue
-            body = "\n".join(lines[idx + 1: min(idx + 4, len(lines))]).strip().lower()
-            if not body:
+            is_broad = (
+                node.type is None
+                or (isinstance(node.type, ast.Name) and node.type.id == "Exception")
+            )
+            if not is_broad or not node.body:
                 continue
-            if any(marker in body for marker in ("pass", "return none", "return {}", "continue", "log.", "logging.", "print(")):
-                evidence = f"Line {idx + 1} catches a broad exception and only logs/returns, which can hide a distinct failure."
-                failure_mode = "A real upstream or parsing error can be silently swallowed, leaving operators with no actionable signal."
-                opportunities.append(
-                    self._build_opportunity(candidate, path, "overbroad_exception_handling", failure_mode, evidence, idx + 1, 70 + base_bonus, files)
-                )
-                break
-        return opportunities
+            for stmt in node.body[:3]:
+                silent = False
+                if isinstance(stmt, (ast.Pass, ast.Continue)):
+                    silent = True
+                elif isinstance(stmt, ast.Return):
+                    silent = True
+                elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                    call = stmt.value
+                    if isinstance(call.func, ast.Attribute) and call.func.attr in _LOG_ATTRS:
+                        silent = True
+                    elif isinstance(call.func, ast.Name) and call.func.id == "print":
+                        silent = True
+                if silent:
+                    evidence = f"Line {node.lineno} catches a broad exception and only logs/returns, which can hide a distinct failure."
+                    failure_mode = "A real upstream or parsing error can be silently swallowed, leaving operators with no actionable signal."
+                    return [self._build_opportunity(candidate, path, "overbroad_exception_handling", failure_mode, evidence, node.lineno, 70 + base_bonus, files)]
+        return []
 
     def _scan_missing_input_validation(
         self,
@@ -352,22 +382,37 @@ class PatternScanner:
         base_bonus: int,
         files: dict[str, str],
     ) -> list[Opportunity]:
-        opportunities: list[Opportunity] = []
-        lines = content.splitlines()
-        patterns = (
-            re.compile(r"sys\.argv\[\d+\]"),
-            re.compile(r"int\(os\.getenv\("),
-            re.compile(r"float\(os\.getenv\("),
-        )
-        for idx, line in enumerate(lines):
-            if any(pattern.search(line) for pattern in patterns):
-                evidence = f"Line {idx + 1} consumes external input directly without validating presence or format first."
-                failure_mode = "A missing or malformed CLI/env input can raise IndexError or ValueError instead of producing a clear operator-facing error."
-                opportunities.append(
-                    self._build_opportunity(candidate, path, "missing_input_validation", failure_mode, evidence, idx + 1, 79 + base_bonus, files)
-                )
-                break
-        return opportunities
+        if not path.endswith(".py"):
+            return []
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id in {"int", "float"}:
+                    if node.args and isinstance(node.args[0], ast.Call):
+                        inner = node.args[0]
+                        if (
+                            isinstance(inner.func, ast.Attribute)
+                            and inner.func.attr == "getenv"
+                            and isinstance(inner.func.value, ast.Name)
+                            and inner.func.value.id == "os"
+                        ):
+                            evidence = f"Line {node.lineno} converts os.getenv() to {node.func.id} without validating it is set."
+                            failure_mode = "A missing or malformed env variable raises ValueError instead of a clear operator-facing error."
+                            return [self._build_opportunity(candidate, path, "missing_input_validation", failure_mode, evidence, node.lineno, 79 + base_bonus, files)]
+            if isinstance(node, ast.Subscript):
+                if (
+                    isinstance(node.value, ast.Attribute)
+                    and node.value.attr == "argv"
+                    and isinstance(node.value.value, ast.Name)
+                    and node.value.value.id == "sys"
+                ):
+                    evidence = f"Line {node.lineno} accesses sys.argv by index without checking its length first."
+                    failure_mode = "A missing CLI argument raises IndexError instead of a clear operator-facing error."
+                    return [self._build_opportunity(candidate, path, "missing_input_validation", failure_mode, evidence, node.lineno, 79 + base_bonus, files)]
+        return []
 
     def _scan_resource_cleanup_gap(
         self,
@@ -377,25 +422,40 @@ class PatternScanner:
         base_bonus: int,
         files: dict[str, str],
     ) -> list[Opportunity]:
-        opportunities: list[Opportunity] = []
-        lines = content.splitlines()
-        assign_open = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*open\(")
+        if not path.endswith(".py"):
+            return []
         if "with open(" in content:
-            return opportunities
-        for idx, line in enumerate(lines):
-            if not assign_open.search(line):
+            return []
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return []
+        with_vars: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.With):
+                for item in node.items:
+                    if item.optional_vars and isinstance(item.optional_vars, ast.Name):
+                        with_vars.add(item.optional_vars.id)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
                 continue
-            var = line.split("=", 1)[0].strip()
-            remainder = "\n".join(lines[idx + 1:])
-            if f"{var}.close(" in remainder:
+            if not isinstance(node.value, ast.Call):
                 continue
-            evidence = f"Line {idx + 1} opens a file handle outside a context manager with no matching close call."
-            failure_mode = "An exception on the write/read path can leave the file handle open and leak resources across repeated runs."
-            opportunities.append(
-                self._build_opportunity(candidate, path, "resource_cleanup_gap", failure_mode, evidence, idx + 1, 72 + base_bonus, files)
-            )
-            break
-        return opportunities
+            call = node.value
+            if not (isinstance(call.func, ast.Name) and call.func.id == "open"):
+                continue
+            for target in node.targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                var_name = target.id
+                if var_name in with_vars:
+                    continue
+                if f"{var_name}.close(" in content:
+                    continue
+                evidence = f"Line {node.lineno} opens a file handle outside a context manager with no matching close call."
+                failure_mode = "An exception on the write/read path can leave the file handle open and leak resources across repeated runs."
+                return [self._build_opportunity(candidate, path, "resource_cleanup_gap", failure_mode, evidence, node.lineno, 72 + base_bonus, files)]
+        return []
 
     def _scan_missing_regression_test(
         self,
@@ -491,18 +551,52 @@ class PatternScanner:
         base_bonus: int,
         files: dict[str, str],
     ) -> list[Opportunity]:
-        shell_true = re.compile(r"subprocess\.(run|call|check_output|Popen)\([^)]*shell\s*=\s*True")
-        taint = re.compile(r"(sys\.argv|input\(|args\.[A-Za-z_]+|os\.getenv\(|environ\[)")
+        if not path.endswith(".py"):
+            return []
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return []
+        _SUBPROCESS_FUNCS = {"run", "call", "check_output", "Popen", "check_call"}
+        _TAINT_ATTRS = {"argv", "getenv", "environ"}
+        _TAINT_NAMES = {"args", "input"}
         lines = content.splitlines()
-        for idx, line in enumerate(lines):
-            if not shell_true.search(line):
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
                 continue
-            context = "\n".join(lines[max(0, idx - 3): min(idx + 4, len(lines))])
-            if not taint.search(context):
+            if not isinstance(node.func, ast.Attribute):
                 continue
-            evidence = f"Line {idx + 1} calls subprocess with shell=True using externally-controlled input."
-            failure_mode = "An unsanitized string from user input or environment can be injected as shell commands."
-            return [self._build_opportunity(candidate, path, "unsafe_subprocess", failure_mode, evidence, idx + 1, 76 + base_bonus, files)]
+            if node.func.attr not in _SUBPROCESS_FUNCS:
+                continue
+            if not (isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess"):
+                continue
+            has_shell_true = any(
+                kw.arg == "shell"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is True
+                for kw in node.keywords
+            )
+            if not has_shell_true:
+                continue
+            # Taint: check first arg's subtree for external-input names
+            has_taint = False
+            if node.args:
+                for sub in ast.walk(node.args[0]):
+                    if isinstance(sub, ast.Attribute) and sub.attr in _TAINT_ATTRS:
+                        has_taint = True
+                        break
+                    if isinstance(sub, ast.Name) and sub.id in _TAINT_NAMES:
+                        has_taint = True
+                        break
+            if not has_taint:
+                # Fallback: nearby lines for taint markers
+                ctx_start = max(0, node.lineno - 4)
+                ctx = "\n".join(lines[ctx_start: node.lineno + 3])
+                has_taint = any(t in ctx for t in ("sys.argv", "os.getenv", "args.", "input(", "environ["))
+            if has_taint:
+                evidence = f"Line {node.lineno} calls subprocess with shell=True using externally-controlled input."
+                failure_mode = "An unsanitized string from user input or environment can be injected as shell commands."
+                return [self._build_opportunity(candidate, path, "unsafe_subprocess", failure_mode, evidence, node.lineno, 76 + base_bonus, files)]
         return []
 
     def _scan_temp_file_cleanup(

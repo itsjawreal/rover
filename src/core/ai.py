@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import requests
+
 from src.core.config import (
     AI_BACKEND,
     ALLOW_BACKEND_FALLBACK,
@@ -26,6 +28,9 @@ from src.core.config import (
     CreditLimitError,
     AI_TIMEOUT_MULTIPLIER,
     AI_TIMEOUT_MAX_SECONDS,
+    OPENROUTER_API_KEY,
+    OPENROUTER_MODEL,
+    OPENROUTER_BASE_URL,
     _is_unusable_cross_os_cli_path,
 )
 
@@ -40,6 +45,10 @@ _LAST_PROBE_RESULT: tuple[str, str] | None = None
 _LOG = logging.getLogger(__name__)
 
 # ── Token usage tracking (char-based proxy) ──────────────────
+# Guarded by _usage_lock: the daemon's PR monitor thread records usage while the
+# main thread (or an MCP status tool) may read a snapshot concurrently. The lock
+# keeps reads and the read-modify-write increments consistent.
+_usage_lock = threading.Lock()
 _usage: dict[str, int] = {"prompt_chars": 0, "response_chars": 0, "calls": 0}
 
 
@@ -66,19 +75,24 @@ def reset_usage() -> None:
     global _ACTIVE_BACKEND, _LAST_PROBE_RESULT
     _ACTIVE_BACKEND = AI_BACKEND
     _LAST_PROBE_RESULT = None
-    _usage["prompt_chars"] = 0
-    _usage["response_chars"] = 0
-    _usage["calls"] = 0
+    with _usage_lock:
+        _usage["prompt_chars"] = 0
+        _usage["response_chars"] = 0
+        _usage["calls"] = 0
 
 
 def get_usage() -> dict:
+    with _usage_lock:
+        calls = _usage["calls"]
+        prompt_chars = _usage["prompt_chars"]
+        response_chars = _usage["response_chars"]
     return {
         "backend": _ACTIVE_BACKEND,
-        "calls": _usage["calls"],
-        "prompt_chars": _usage["prompt_chars"],
-        "response_chars": _usage["response_chars"],
-        "total_chars": _usage["prompt_chars"] + _usage["response_chars"],
-        "est_tokens": (_usage["prompt_chars"] + _usage["response_chars"]) // 4,
+        "calls": calls,
+        "prompt_chars": prompt_chars,
+        "response_chars": response_chars,
+        "total_chars": prompt_chars + response_chars,
+        "est_tokens": (prompt_chars + response_chars) // 4,
     }
 
 
@@ -87,7 +101,16 @@ def get_backend_name() -> str:
 
 
 def get_backend_label() -> str:
+    if _ACTIVE_BACKEND == "openrouter":
+        return "OpenRouter"
     return "Codex" if _ACTIVE_BACKEND == "codex" else "Claude"
+
+
+def _record_usage(prompt: str, response_text: str = "") -> None:
+    with _usage_lock:
+        _usage["calls"] += 1
+        _usage["prompt_chars"] += len(prompt)
+        _usage["response_chars"] += len(response_text)
 
 
 # ── Parsing helpers ──────────────────────────────────────────
@@ -177,10 +200,54 @@ def _detect_backend_runtime_issue(stderr_text: str, stdout_text: str) -> Runtime
     return None
 
 
+def _extract_first_json_object(text: str) -> str | None:
+    """Return the first balanced top-level {...} object, ignoring surrounding prose.
+
+    Brace-aware and string-aware so nested objects and braces inside string
+    literals do not break the match. Reasoning models (and OpenRouter responses)
+    often wrap the JSON in explanation text; this recovers it.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
 def _parse_json(raw: str) -> dict:
-    raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
-    raw = re.sub(r"\s*```$", "", raw)
-    return json.loads(raw)
+    text = raw.strip()
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Reasoning models may prepend/append prose around the JSON — recover the object.
+    obj = _extract_first_json_object(text)
+    if obj is not None:
+        return json.loads(obj)
+    return json.loads(text)  # re-raise the original decode error
 
 
 def _strip_fences(text: str) -> str:
@@ -342,6 +409,8 @@ def _build_backend_env() -> dict[str, str]:
 
 
 def _has_usable_backend(backend: str) -> bool:
+    if backend == "openrouter":
+        return bool(OPENROUTER_API_KEY)
     if backend == "codex":
         if not CODEX_CMD:
             return False
@@ -389,6 +458,69 @@ def _materialize_claude_prompt(prompt: str) -> str:
     )
 
 
+def _call_openrouter(prompt: str, timeout: int, stream_path: Path | None = None) -> str:
+    """Call an OpenAI-compatible chat-completions API (OpenRouter by default).
+
+    Returns the assistant message text. Raises the same exception types as the CLI
+    backends so the rest of the engine handles errors uniformly.
+    """
+    if not OPENROUTER_API_KEY:
+        raise BackendConfigurationError(
+            "OPENROUTER_API_KEY is not set. Add it to .env to use AI_BACKEND=openrouter."
+        )
+    if not OPENROUTER_MODEL:
+        raise BackendConfigurationError(
+            "OPENROUTER_MODEL is not set. Set it to an OpenRouter model id "
+            "(e.g. OPENROUTER_MODEL=anthropic/claude-3.5-sonnet) in .env."
+        )
+
+    url = f"{OPENROUTER_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {"model": OPENROUTER_MODEL, "messages": [{"role": "user", "content": prompt}]}
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    except requests.Timeout as exc:
+        raise BackendRuntimeError(f"OpenRouter request timed out after {timeout}s") from exc
+    except requests.RequestException as exc:
+        raise BackendRuntimeError(f"OpenRouter request failed: {str(exc)[:200]}") from exc
+
+    if resp.status_code != 200:
+        body = (resp.text or "").strip()
+        low = body.lower()
+        if resp.status_code in (401, 403):
+            raise BackendConfigurationError(
+                f"OpenRouter auth failed (HTTP {resp.status_code}); check OPENROUTER_API_KEY."
+            )
+        if resp.status_code == 402 or any(kw in low for kw in CREDIT_LIMIT_KEYWORDS):
+            _record_usage(prompt, "")
+            raise CreditLimitError(f"OpenRouter credit/quota limit: {body[:200]}")
+        if resp.status_code == 429 or any(kw in low for kw in RATE_LIMIT_KEYWORDS):
+            _record_usage(prompt, "")
+            raise RuntimeError(f"OpenRouter rate limited (temporary): {body[:200]}")
+        raise BackendRuntimeError(f"OpenRouter HTTP {resp.status_code}: {body[:200]}")
+
+    try:
+        data = resp.json()
+        text = (data["choices"][0]["message"]["content"] or "").strip()
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise BackendRuntimeError(
+            f"OpenRouter returned an unexpected response shape: {str(exc)[:200]}"
+        ) from exc
+
+    _record_usage(prompt, text)
+    if stream_path:
+        try:
+            stream_path.parent.mkdir(parents=True, exist_ok=True)
+            stream_path.write_text(text, encoding="utf-8")
+        except Exception:
+            pass
+    return text
+
+
 def _call_backend(
     prompt: str,
     timeout: int = 600,
@@ -396,6 +528,8 @@ def _call_backend(
     stream_path: Path | None = None,
 ) -> str:
     """Call the configured AI backend. Streams stdout to stream_path while generating."""
+    if _ACTIVE_BACKEND == "openrouter":
+        return _call_openrouter(prompt, timeout, stream_path)
     backend_label = get_backend_label()
     backend_cmd, _backend_args = _get_backend_command()
     spawn_argv, stdin_payload = _prepare_invocation(prompt)
@@ -438,7 +572,16 @@ def _call_backend(
 
     # Write stdin and close only for stdin-driven backends.
     if stdin_payload is not None:
-        proc.stdin.write(stdin_payload)
+        try:
+            proc.stdin.write(stdin_payload)
+        except BrokenPipeError as exc:
+            proc.wait(timeout=5)
+            stderr_text = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
+            stdout_text = proc.stdout.read().decode("utf-8", errors="replace") if proc.stdout else ""
+            if fatal_runtime_issue := _detect_backend_runtime_issue(stderr_text, stdout_text):
+                raise fatal_runtime_issue from exc
+            error_text = _extract_error_text(stderr_text, stdout_text)
+            raise BackendRuntimeError(f"{backend_label} backend closed stdin early: {error_text[:300]}") from exc
     proc.stdin.close()
 
     # Read stdout/stderr in background threads so output streams to disk while generating
@@ -482,28 +625,32 @@ def _call_backend(
         if "you've hit your limit" in err_lower and (reset_wait := _extract_reset_wait_seconds(err_lower)):
             wait_seconds, reset_at = reset_wait
             if auto_wait_cycles >= _MAX_AUTO_WAIT_CYCLES:
+                _record_usage(prompt, stdout_text)
                 raise CreditLimitError(error_text[:300])
             reset_text = reset_at.strftime("%Y-%m-%d %H:%M:%S %Z") if reset_at else "the reported reset time"
             _LOG.warning(
                 "%s rate limit hit: %s. Sleeping for %ss until %s before retrying.",
                 backend_label, error_text, wait_seconds, reset_text,
             )
+            _record_usage(prompt, stdout_text)
             time.sleep(wait_seconds)
             return _call_backend(prompt, timeout=timeout, auto_wait_cycles=auto_wait_cycles + 1)
 
         if any(kw in err_lower for kw in CREDIT_LIMIT_KEYWORDS):
+            _record_usage(prompt, stdout_text)
             raise CreditLimitError(f"{backend_label} credit/quota limit detected: {error_text[:300]}")
         if any(kw in err_lower for kw in RATE_LIMIT_KEYWORDS):
+            _record_usage(prompt, stdout_text)
             raise RuntimeError(f"{backend_label} rate limited (temporary): {error_text[:200]}")
+        _record_usage(prompt, stdout_text)
         raise RuntimeError(f"{_ACTIVE_BACKEND} CLI failed:\n{error_text}")
 
-    _usage["calls"] += 1
-    _usage["prompt_chars"] += len(prompt)
-    _usage["response_chars"] += len(stdout_text)
+    _record_usage(prompt, stdout_text)
     return stdout_text
 
 
 def call_ai(prompt: str, timeout: int = 600, stream_path: Path | None = None) -> str:
+    original_backend = _ACTIVE_BACKEND
     try:
         return _call_backend(prompt, timeout=timeout, stream_path=stream_path)
     except (BackendConfigurationError, BackendRuntimeError) as exc:
@@ -529,6 +676,8 @@ def call_ai(prompt: str, timeout: int = 600, stream_path: Path | None = None) ->
                     f"{primary_backend} backend unavailable: {exc} | fallback(s) unavailable: {' | '.join(fallback_errors)}"
                 ) from exc
         raise
+    finally:
+        _switch_backend(original_backend)
 
 
 def probe_backend(timeout: int = 20) -> str:

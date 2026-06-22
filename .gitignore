@@ -3,6 +3,11 @@
 .mcp.json
 .claude/settings.local.json
 
+# personal "context-mode" editor tooling (separate local tool, not part of Rover)
+.claude/settings.json
+.vscode/
+.github/hooks/
+
 # runtime state (temp files, not source)
 data/*.json
 data/*.sqlite3

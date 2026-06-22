@@ -20,6 +20,7 @@ from src.contrib.contribution_store import PREngineStore
 from src.contrib.opportunity_engine import (
     Opportunity,
     PatternScanner,
+    TEST_FILE_RE,
     expected_test_root,
     guess_test_target,
     qualify_opportunity,
@@ -1067,25 +1068,65 @@ def _targeted_pattern_policy(opportunity: Opportunity) -> PatternSubmitPolicy:
     )
 
 
+# Paths that are never real business logic — logic patterns are always false positives here.
+_INFRA_DIR_MARKERS = (
+    # Test fixture / data directories
+    "test/suite/", "test/data/", "test/fixtures/", "tests/fixtures/",
+    "tests/data/", "test/samples/", "tests/samples/",
+    # Editor/tool config dirs — hook utilities, not user-facing logic
+    ".claude/hooks/", ".claude/commands/",
+    # Vendored code
+    "vendor/", "vendors/", "third_party/", "third-party/",
+)
+_LOGIC_PATTERNS = frozenset({
+    "unchecked_response_shape", "missing_input_validation", "missing_timeout",
+    "resource_cleanup_gap", "overbroad_exception_handling",
+})
+
+
+def _universal_path_rejection(opportunity: Opportunity) -> str | None:
+    """Block patterns that fire on non-business-logic paths in ALL modes."""
+    if opportunity.pattern_type not in _LOGIC_PATTERNS:
+        return None
+    normalized_lower = opportunity.target_file.replace("\\", "/").lower()
+    for marker in _INFRA_DIR_MARKERS:
+        if marker in normalized_lower:
+            return f"{opportunity.pattern_type} fired on an infrastructure/config path — not executable business logic."
+    return None
+
+
 def _targeted_breadth_rejection(candidate: RepoCandidate, opportunity: Opportunity) -> str | None:
     content = candidate.files.get(opportunity.target_file, "")
     line_count = len(content.splitlines()) if content else 0
     policy = _targeted_pattern_policy(opportunity)
-    if _looks_like_core_target(opportunity.target_file) and line_count > 180:
-        return "Target file is a core entrypoint and too large for a reliable narrow targeted PR."
-    if line_count > 260:
-        return "Target file is too large for a narrow targeted PR shortlist."
-    if opportunity.patch_scope > 1 and not opportunity.test_target:
-        return "Opportunity implies cross-file edits without a concrete nearby proof path."
-    normalized = opportunity.target_file.replace("\\", "/")
+
+    # Hard block: pattern explicitly excluded from targeted live mode
     if policy.mode == "blocked_for_targeted_live":
         return f"{opportunity.pattern_type} is blocked for targeted live mode by submit policy."
-    if policy.require_test_target and not opportunity.test_target:
+
+    # File size ceiling — based on AI context capacity, not diff budget.
+    # Raised from 260→500: mature repos have 300-400 line service files that still have narrow fixable bugs.
+    # Core entrypoints (app.py, __init__.py, main.py) stay at a lower limit because they carry global risk.
+    if _looks_like_core_target(opportunity.target_file) and line_count > 300:
+        return "Target file is a core entrypoint and too large for a reliable narrow targeted PR."
+    if line_count > 500:
+        return "Target file is too large for AI to reason about safely in a narrow targeted PR."
+
+    if opportunity.patch_scope > 1 and not opportunity.test_target:
+        return "Opportunity implies cross-file edits without a concrete nearby proof path."
+
+    normalized = opportunity.target_file.replace("\\", "/")
+
+    # Sparse-test repos: relax require_test_target to a score penalty rather than a hard block.
+    # A repo with <10 test files rarely has a neat 1-to-1 test mapping; blocking on it wastes all opportunities.
+    test_file_count = sum(1 for p in candidate.files if TEST_FILE_RE.search(p.replace("\\", "/").lower()))
+    sparse_tests = test_file_count < 10
+    if policy.require_test_target and not opportunity.test_target and not sparse_tests:
         return f"{opportunity.pattern_type} needs a focused nearby regression test before targeted live mode will try it."
-    if line_count > max(140, policy.max_diff_lines):
-        return f"{opportunity.pattern_type} target is too large to prove a behavior-preserving narrow patch safely."
+
     if policy.banned_surface_re and policy.banned_surface_re.search(normalized):
         return f"{opportunity.pattern_type} in this surface is too risky for targeted live mode."
+
     return None
 
 
@@ -1095,18 +1136,30 @@ def _targeted_patchability_score(candidate: RepoCandidate, opportunity: Opportun
     value = score
     normalized = opportunity.target_file.replace("\\", "/")
     policy = _targeted_pattern_policy(opportunity)
+
+    # Sparse-test repos: many active repos have low test/code ratios.
+    # Applying the full test-target penalty in this case kills all candidates — reduce it.
+    test_file_count = sum(1 for p in candidate.files if TEST_FILE_RE.search(p.replace("\\", "/").lower()))
+    sparse_tests = test_file_count < 10
+
     if _looks_like_core_target(opportunity.target_file):
         value -= 32
-    if line_count > 220:
-        value -= 24
+    # Hard penalty tiers for large files: AI must output the full modified file,
+    # so very large targets reliably time out the generate phase.
+    if line_count > 600:
+        value -= 55  # almost certainly below threshold; prevents generate timeouts
+    elif line_count > 400:
+        value -= 30
+    elif line_count > 220:
+        value -= 16 if sparse_tests else 24
     elif line_count > 160:
-        value -= 14
+        value -= 8 if sparse_tests else 14
     elif line_count > 120:
-        value -= 6
+        value -= 4 if sparse_tests else 6
     if opportunity.patch_scope > 1:
         value -= 22
     if not opportunity.test_target:
-        value -= 14
+        value -= 5 if sparse_tests else 14
     elif expected_test_root(candidate.files, opportunity.target_file):
         value += 6
     line_no = int(getattr(opportunity, "line_no", 0) or 0)
@@ -1227,7 +1280,12 @@ def _discover_opportunities(
     base_score = _acceptance_score(candidate, candidate.files)
     _ENGINE_STORE.upsert_repo_profile(candidate, base_score)
 
-    opportunities = _PATTERN_SCANNER.scan(candidate)
+    # In targeted mode, skip patterns that are unconditionally blocked — no point generating
+    # opportunities that will always be rejected at the breadth-rejection step.
+    _targeted_skip: set[str] | None = None
+    if targeted_mode:
+        _targeted_skip = {pt for pt, pol in _TARGETED_PATTERN_POLICIES.items() if pol.mode == "blocked_for_targeted_live"}
+    opportunities = _PATTERN_SCANNER.scan(candidate, excluded_patterns=_targeted_skip)
     if goal == "bugfix":
         pattern_bugs = [o for o in opportunities if o.opportunity_kind == "bugfix"]
         issue_bugs = _discover_issue_backed_bugfixes(candidate)
@@ -1265,6 +1323,19 @@ def _discover_opportunities(
         source = "issue_ingest" if opportunity.source_ref.startswith("issue:") else "code_scan"
         opportunity_id = _ENGINE_STORE.create_opportunity(_ACTIVE_RUN_ID, opportunity, source=source)
         opportunity.opportunity_id = opportunity_id
+        universal_rejection = _universal_path_rejection(opportunity)
+        if universal_rejection:
+            _ENGINE_STORE.reject_opportunity(
+                _ACTIVE_RUN_ID,
+                opportunity,
+                "infra_path_false_positive",
+                universal_rejection,
+                "QUALIFY",
+                opportunity_id=opportunity_id,
+            )
+            _bump_run_metric("broad_rejected_early")
+            rejections.append(f"{opportunity.pattern_type}:infra_path_false_positive")
+            continue
         targeted_breadth = _targeted_breadth_rejection(candidate, opportunity) if targeted_mode else None
         if targeted_breadth:
             _ENGINE_STORE.reject_opportunity(
@@ -1950,13 +2021,14 @@ def fetch_repo_candidate(
     log: logging.Logger,
     *,
     override_limits: bool = False,
+    status_cb: "Callable[[str], None] | None" = None,
 ) -> RepoCandidate:
     """Fetch a specific repo by URL or owner/repo and return a RepoCandidate.
 
     Works for both external repos and operator-owned repos.
     Raises ScraperError if the repo can't be fetched or has no Python/TypeScript files.
     """
-    return fetch_repo_candidate_with_scope(repo_url, log, enforce_scope=True, override_limits=override_limits)
+    return fetch_repo_candidate_with_scope(repo_url, log, enforce_scope=True, override_limits=override_limits, status_cb=status_cb)
 
 
 def fetch_repo_candidate_with_scope(
@@ -1965,6 +2037,7 @@ def fetch_repo_candidate_with_scope(
     *,
     enforce_scope: bool,
     override_limits: bool = False,
+    status_cb: "Callable[[str], None] | None" = None,
 ) -> RepoCandidate:
     """Fetch a specific repo and optionally enforce narrow contribution scope gates."""
 
@@ -2014,11 +2087,19 @@ def fetch_repo_candidate_with_scope(
     allow_broad = override_limits or _PR_TARGETED_ALLOW_BROAD
     _pre_max_py = _PR_TARGETED_MAX_PY_FILES if not allow_broad else None
     _pre_max_total = _PR_TARGETED_MAX_TOTAL_FILES if not allow_broad else None
-    candidate.files = download_repo_files(candidate, max_py=_pre_max_py, max_total=_pre_max_total)
+    candidate.files = download_repo_files(
+        candidate,
+        max_py=_pre_max_py,
+        max_total=_pre_max_total,
+        allowed_exts=(".py", ".ts", ".tsx", ".json", ".toml", ".yml", ".yaml"),
+        status_cb=status_cb,
+    )
     if not candidate.files:
         raise ScraperError(f"No files downloaded from {full_name}")
 
     try:
+        if status_cb:
+            status_cb(f"checking maintainer signals for {full_name}...")
         candidate.maintainer_signals = fetch_maintainer_signals(candidate)
         log.info("Maintainer signals for %s: %s", full_name, {k: v for k, v in candidate.maintainer_signals.items() if k != "contributing_snippet"})
     except Exception:
@@ -2142,6 +2223,59 @@ def _fetch_branch_files(fork_full: str, branch_name: str, file_paths: list[str])
     return files
 
 
+_APPROVED_MARKERS = (
+    "lgtm", "looks good", "looks great", "approved", "ship it", "merge it",
+    "thank you", "thanks", "great work", "nice work", "good work", "well done",
+    ":+1:", "👍", "🎉", "✅",
+)
+_TEST_MARKERS = (
+    "test", "tests", "spec", "coverage", "unittest", "pytest", "assert",
+    "missing test", "add test", "need test", "write test",
+)
+_STYLE_MARKERS = (
+    "style", "format", "lint", "pep8", "flake8", "black", "isort",
+    "whitespace", "indentation", "naming", "convention",
+)
+_WRONG_APPROACH_MARKERS = (
+    "revert", "undo", "wrong approach", "different approach", "not the right",
+    "this is not", "instead you should", "please use", "consider using",
+    "this breaks", "this changes behavior", "too broad", "out of scope",
+)
+
+
+def _classify_maintainer_comment(body: str, review_state: str = "") -> str:
+    """Classify maintainer comment into one of four categories.
+
+    Returns one of: 'approved', 'needs_test', 'style_issue',
+    'wrong_approach', or 'needs_change' (generic).
+    """
+    lower = body.lower().strip()
+
+    # CHANGES_REQUESTED from review always means needs_change at minimum
+    if review_state == "CHANGES_REQUESTED":
+        # But still try to be more specific
+        if any(m in lower for m in _TEST_MARKERS):
+            return "needs_test"
+        if any(m in lower for m in _STYLE_MARKERS):
+            return "style_issue"
+        if any(m in lower for m in _WRONG_APPROACH_MARKERS):
+            return "wrong_approach"
+        return "needs_change"
+
+    # Short pure-approval comments
+    if len(lower) < 120 and any(m in lower for m in _APPROVED_MARKERS):
+        if not any(m in lower for m in _TEST_MARKERS + _STYLE_MARKERS + _WRONG_APPROACH_MARKERS):
+            return "approved"
+
+    if any(m in lower for m in _WRONG_APPROACH_MARKERS):
+        return "wrong_approach"
+    if any(m in lower for m in _TEST_MARKERS):
+        return "needs_test"
+    if any(m in lower for m in _STYLE_MARKERS):
+        return "style_issue"
+    return "needs_change"
+
+
 def generate_pr_response(
     entry: dict,
     comment_body: str,
@@ -2149,6 +2283,7 @@ def generate_pr_response(
     log: logging.Logger,
     inline_comments: list[dict] | None = None,
     review_state: str = "",
+    comment_class: str = "",
 ) -> PRFeedbackAction:
     """Ask AI what to do in response to maintainer feedback on our PR.
 
@@ -2186,6 +2321,17 @@ def generate_pr_response(
 
     review_section = f"\nReview decision: {review_state}\n" if review_state else ""
 
+    _CLASS_HINT = {
+        "needs_test":     "The maintainer is asking for tests. Add or extend test coverage for the changed code.",
+        "style_issue":    "The maintainer flagged a style/formatting issue. Fix formatting only — no logic changes.",
+        "wrong_approach": "The maintainer wants a different approach. Discuss in the reply; propose an alternative if clear.",
+        "needs_change":   "The maintainer wants a code change. Implement exactly what was asked.",
+        "approved":       "The maintainer approved. No code changes needed — write a short thank-you reply.",
+    }
+    class_hint_section = ""
+    if comment_class and comment_class in _CLASS_HINT:
+        class_hint_section = f"\nFeedback classification: {comment_class} — {_CLASS_HINT[comment_class]}\n"
+
     prompt = f"""You are a senior engineer who submitted a PR to an open-source repo and received feedback.
 
 PR: {pr_url}
@@ -2195,7 +2341,7 @@ Our branch: {branch_name}
 
 Current state of changed files:
 {files_dump if files_dump else "(files not available)"}
-{review_section}{inline_section}
+{review_section}{class_hint_section}{inline_section}
 Maintainer comment from @{comment_author}:
 {comment_body}
 
@@ -2399,49 +2545,70 @@ def check_pr_feedback(log: logging.Logger) -> None:
         log.info("  Feedback from @%s: %s", comment_author, comment_body[:200])
         _ENGINE_STORE.record_feedback_signal(full_name, "maintainer_feedback")
 
-        try:
-            action = generate_pr_response(
-                entry, comment_body, comment_author, log,
-                inline_comments=new_inline or None,
-                review_state=review_state,
-            )
-        except PRGeneratorError as e:
-            log.warning("  AI failed for %s: %s — skipping", pr_url, e)
-            continue
+        # Deterministic pre-classifier — avoids AI token waste on LGTM/trivial comments
+        comment_class = _classify_maintainer_comment(comment_body, review_state)
+        log.info("  Comment classified as: %s", comment_class)
 
-        # Push code fix if AI produced changed files
-        if action.changed_files:
-            log.info("  Applying %d file(s) to branch %s", len(action.changed_files), action.branch_name)
-            try:
-                push_to_branch(
-                    fork_full=action.fork_name,
-                    branch_name=action.branch_name,
-                    changed_files=action.changed_files,
-                    commit_msg=action.commit_msg or f"fix: address feedback from @{latest['user']}",
-                    log=log,
-                )
-                log.info("  Fix pushed to branch")
-            except ForkError as e:
-                log.warning("  Push failed: %s — will still post reply", e)
-
-        # Post reply comment
-        reply_text = action.reply
-        from src.github.fork import gh_safe_env
-        r = subprocess.run(
-            ["gh", "pr", "comment", pr_url, "--body", reply_text],
-            capture_output=True, text=True, encoding="utf-8", timeout=20,
-            env=gh_safe_env(),
-        )
-        if r.returncode == 0:
-            log.info("  Reply posted: %s", pr_url)
-            notify(
-                f"PR feedback addressed\n"
-                f"Repo: {full_name}\n"
-                f"Comment by: @{latest['user']}\n"
-                f"URL: {pr_url}"
+        if comment_class == "approved":
+            # No code change needed — post acknowledgment without AI call
+            ack_text = "Thanks for the review! Glad it looks good."
+            from src.github.fork import gh_safe_env
+            r = subprocess.run(
+                ["gh", "pr", "comment", pr_url, "--body", ack_text],
+                capture_output=True, text=True, encoding="utf-8", timeout=20,
+                env=gh_safe_env(),
             )
+            if r.returncode == 0:
+                log.info("  revision_skipped_approved: %s", pr_url)
+            else:
+                log.warning("  Failed to post ack: %s", (r.stdout + r.stderr).strip()[:200])
         else:
-            log.warning("  Failed to post reply: %s", (r.stdout + r.stderr).strip()[:200])
+            try:
+                action = generate_pr_response(
+                    entry, comment_body, comment_author, log,
+                    inline_comments=new_inline or None,
+                    review_state=review_state,
+                    comment_class=comment_class,
+                )
+            except PRGeneratorError as e:
+                log.warning("  AI failed for %s: %s — skipping", pr_url, e)
+                continue
+
+            # Push code fix if AI produced changed files
+            from src.github.fork import gh_safe_env
+            if action.changed_files:
+                log.info("  Applying %d file(s) to branch %s", len(action.changed_files), action.branch_name)
+                try:
+                    push_to_branch(
+                        fork_full=action.fork_name,
+                        branch_name=action.branch_name,
+                        changed_files=action.changed_files,
+                        commit_msg=action.commit_msg or f"fix: address feedback from @{latest['user']}",
+                        log=log,
+                    )
+                    log.info("  revision_pushed: %s", pr_url)
+                except ForkError as e:
+                    log.warning("  revision_push_failed: %s — %s", pr_url, e)
+            else:
+                log.info("  revision_skipped_no_changes: %s", pr_url)
+
+            # Post reply comment
+            reply_text = action.reply
+            r = subprocess.run(
+                ["gh", "pr", "comment", pr_url, "--body", reply_text],
+                capture_output=True, text=True, encoding="utf-8", timeout=20,
+                env=gh_safe_env(),
+            )
+            if r.returncode == 0:
+                log.info("  Reply posted: %s", pr_url)
+                notify(
+                    f"PR feedback addressed\n"
+                    f"Repo: {full_name}\n"
+                    f"Comment by: @{latest['user']}\n"
+                    f"URL: {pr_url}"
+                )
+            else:
+                log.warning("  Failed to post reply: %s", (r.stdout + r.stderr).strip()[:200])
 
         # Advance last_seen past all fetched IDs
         all_ids = (
@@ -2647,43 +2814,84 @@ def check_all_prs(log: logging.Logger) -> None:
 
             log.info("  Feedback from @%s: %s", comment_author, comment_body[:200])
             _ENGINE_STORE.record_feedback_signal(full_name, "maintainer_feedback")
+            notify(
+                f"PR NEW COMMENT — auto-reviewing\n"
+                f"Repo: {full_name}\n#{pr_number_str}: {pr_title}\n"
+                f"From: @{comment_author}\n{comment_body[:200]}\nURL: {pr_url}"
+            )
 
-            try:
-                action = generate_pr_response(
-                    entry, comment_body, comment_author, log,
-                    inline_comments=new_inline or None,
-                    review_state=review_state,
-                )
-            except PRGeneratorError as e:
-                log.warning("  AI failed for %s: %s — skipping", pr_url, e)
-                print_blank()
-                time.sleep(0.5)
-                continue
-
-            if action.changed_files:
-                log.info("  Applying %d file(s) to branch %s", len(action.changed_files), action.branch_name)
-                try:
-                    push_to_branch(
-                        fork_full=action.fork_name,
-                        branch_name=action.branch_name,
-                        changed_files=action.changed_files,
-                        commit_msg=action.commit_msg or f"fix: address feedback from @{latest['user']}",
-                        log=log,
-                    )
-                except ForkError as e:
-                    log.warning("  Push failed: %s — will still post reply", e)
+            # Deterministic pre-classifier — avoids AI token waste on LGTM/trivial comments
+            comment_class = _classify_maintainer_comment(comment_body, review_state)
+            log.info("  Comment classified as: %s", comment_class)
 
             from src.github.fork import gh_safe_env as _gh_env
-            rp = subprocess.run(
-                ["gh", "pr", "comment", pr_url, "--body", action.reply],
-                capture_output=True, text=True, encoding="utf-8", timeout=20,
-                env=_gh_env(),
-            )
-            if rp.returncode == 0:
-                log.info("  Reply posted: %s", pr_url)
-                notify(f"PR feedback addressed\nRepo: {full_name}\nComment by: @{latest['user']}\nURL: {pr_url}")
+
+            if comment_class == "approved":
+                ack_text = "Thanks for the review! Glad it looks good."
+                rp = subprocess.run(
+                    ["gh", "pr", "comment", pr_url, "--body", ack_text],
+                    capture_output=True, text=True, encoding="utf-8", timeout=20,
+                    env=_gh_env(),
+                )
+                if rp.returncode == 0:
+                    log.info("  revision_skipped_approved: %s", pr_url)
+                    print_ok(f"  ‣  approved — ack posted")
+                else:
+                    log.warning("  Failed to post ack: %s", (rp.stdout + rp.stderr).strip()[:200])
             else:
-                log.warning("  Failed to post reply: %s", (rp.stdout + rp.stderr).strip()[:200])
+                try:
+                    action = generate_pr_response(
+                        entry, comment_body, comment_author, log,
+                        inline_comments=new_inline or None,
+                        review_state=review_state,
+                        comment_class=comment_class,
+                    )
+                except PRGeneratorError as e:
+                    log.warning("  AI failed for %s: %s — skipping", pr_url, e)
+                    print_blank()
+                    time.sleep(0.5)
+                    continue
+
+                fix_pushed = False
+                if action.changed_files:
+                    log.info("  Applying %d file(s) to branch %s", len(action.changed_files), action.branch_name)
+                    try:
+                        push_to_branch(
+                            fork_full=action.fork_name,
+                            branch_name=action.branch_name,
+                            changed_files=action.changed_files,
+                            commit_msg=action.commit_msg or f"fix: address feedback from @{latest['user']}",
+                            log=log,
+                        )
+                        fix_pushed = True
+                        log.info("  revision_pushed: %s", pr_url)
+                    except ForkError as e:
+                        log.warning("  revision_push_failed: %s — %s", pr_url, e)
+                        notify(
+                            f"PR FIX PUSH FAILED\nRepo: {full_name}\n#{pr_number_str}: {pr_title}\n"
+                            f"Error: {e}\nURL: {pr_url}"
+                        )
+                else:
+                    log.info("  revision_skipped_no_changes: %s", pr_url)
+
+                rp = subprocess.run(
+                    ["gh", "pr", "comment", pr_url, "--body", action.reply],
+                    capture_output=True, text=True, encoding="utf-8", timeout=20,
+                    env=_gh_env(),
+                )
+                if rp.returncode == 0:
+                    log.info("  Reply posted: %s", pr_url)
+                    files_info = (
+                        f"Fixed {len(action.changed_files)} file(s): "
+                        + ", ".join(list(action.changed_files.keys())[:3])
+                        if fix_pushed else "No code changes needed"
+                    )
+                    notify(
+                        f"PR AUTO-REVIEWED\nRepo: {full_name}\n#{pr_number_str}: {pr_title}\n"
+                        f"From: @{latest['user']}\n{files_info}\nURL: {pr_url}"
+                    )
+                else:
+                    log.warning("  Failed to post reply: %s", (rp.stdout + rp.stderr).strip()[:200])
 
             all_ids = (
                 [c["id"] for c in issue_comments]
@@ -3653,6 +3861,23 @@ Respond with JSON only:
         except Exception as exc:
             last_error = f"patch plan AI call failed: {exc}"
             continue
+        # Detect self-rejection: plan AI acknowledging the opportunity doesn't apply to this file.
+        # When this happens, continuing to generate is pointless — fail fast so the caller
+        # can select a different opportunity rather than burning 320s on generate timeouts.
+        _PLAN_SELF_REJECT_PHRASES = (
+            "cannot plan", "not present in this", "does not map to", "should be rejected",
+            "no response parsing", "refusing to expand", "not applicable", "cannot identify",
+            "cannot fix", "does not contain", "no concrete", "no real logic",
+        )
+        self_reject = any(
+            phrase in plan.failure_mode.lower() or phrase in plan.why_narrow.lower()
+            for phrase in _PLAN_SELF_REJECT_PHRASES
+        )
+        if self_reject:
+            raise PRGeneratorError(
+                f"Plan AI self-rejected this opportunity: {plan.failure_mode[:120]}"
+            )
+
         rejection = _validate_patch_plan(candidate, opportunity, plan)
         if rejection:
             last_error = rejection
@@ -3691,10 +3916,22 @@ def _structural_review(
 ) -> str | None:
     if len(changed_files) > _TARGETED_MAX_CHANGED_FILES:
         return f"Patch changed {len(changed_files)} files; targeted runs allow at most {_TARGETED_MAX_CHANGED_FILES}."
-    if opportunity.target_file not in changed_files:
-        return "Patch did not modify the chosen target file."
-    expected_files = {path.replace("\\", "/") for path in plan.expected_files}
-    changed_paths = {path.replace("\\", "/") for path in changed_files}
+
+    # Normalize paths before comparing — AI sometimes adds leading "./" or uses different slashes.
+    def _norm(p: str) -> str:
+        return p.replace("\\", "/").lstrip("./").strip()
+
+    target_norm = _norm(opportunity.target_file)
+    changed_norms = {_norm(p): p for p in changed_files}
+    if target_norm not in changed_norms:
+        # Try basename match as last resort (e.g., "autopep8.py" matches "src/autopep8.py")
+        target_base = target_norm.split("/")[-1]
+        base_match = next((orig for n, orig in changed_norms.items() if n.split("/")[-1] == target_base), None)
+        if base_match is None:
+            return "Patch did not modify the chosen target file."
+
+    expected_files = {_norm(path) for path in plan.expected_files}
+    changed_paths = {_norm(path) for path in changed_files}
     if expected_files and not changed_paths.issubset(expected_files):
         unexpected = sorted(changed_paths - expected_files)
         return f"Patch escaped the approved plan and touched unexpected files: {unexpected[:3]}"
@@ -3717,6 +3954,13 @@ def _structural_review(
     if len(no_diff) == len(changed_files):
         return "Generated files were identical to the originals."
     return None
+
+
+def _is_terminal_structural_rejection(reason: str) -> bool:
+    normalized = (reason or "").strip().lower()
+    # "identical to originals" is a true dead end — AI has no new signal to work with.
+    # "did not modify target file" is retryable — the retry prompt will explicitly re-anchor the AI.
+    return "generated files were identical to the originals" in normalized
 
 
 # ── AI improvement generator ──────────────────────────────────
@@ -3796,6 +4040,19 @@ def generate_pr_improvement(
     focused_dump = source_dump
     if target_file and target_file in source_files:
         target_content = source_files[target_file]
+        # Cap large single files to char_budget — without this cap, a file larger than
+        # char_budget bypasses the source_dump budget and inflates the prompt 2x+.
+        if len(target_content) > char_budget:
+            lines = target_content.splitlines()
+            cap_lines: list[str] = []
+            cap_len = 0
+            for ln in lines:
+                cap_len += len(ln) + 1
+                if cap_len > char_budget:
+                    break
+                cap_lines.append(ln)
+            trunc_marker = "# ── [file truncated to fit context budget] ──" if not is_typescript else "// ── [file truncated to fit context budget] ──"
+            target_content = "\n".join(cap_lines) + f"\n{trunc_marker}\n"
         focused_dump = (
             f"\n# ── {target_file} ──\n{target_content}\n"
             if not is_typescript
@@ -3822,7 +4079,18 @@ def generate_pr_improvement(
     if _git_history_section:
         focused_dump = focused_dump + _git_history_section
 
-    patch_plan = _plan_pr_patch(candidate, opportunity, focused_dump, dep_section, is_typescript, log) if targeted_mode else None
+    # Plan phase gets half the context budget — it only needs to confirm scope, not generate code.
+    _plan_char_cap = char_budget // 2
+    plan_focused_dump = focused_dump
+    if len(plan_focused_dump) > _plan_char_cap:
+        cap = plan_focused_dump[:_plan_char_cap]
+        last_nl = cap.rfind("\n")
+        if last_nl > _plan_char_cap // 2:
+            cap = cap[:last_nl + 1]
+        plan_marker = "# ── [truncated for planning phase] ──" if not is_typescript else "// ── [truncated for planning phase] ──"
+        plan_focused_dump = cap + plan_marker + "\n"
+
+    patch_plan = _plan_pr_patch(candidate, opportunity, plan_focused_dump, dep_section, is_typescript, log) if targeted_mode else None
 
     if opportunity.opportunity_kind == "bugfix":
         plan_section = ""
@@ -3967,6 +4235,7 @@ Respond with JSON only:
     evidence_rejection_count = 0
     diff_rejection_count = 0
     max_category_rejections = 2
+    _structural_retry_hint = ""  # injected into prompt when AI missed the target file
     _ENGINE_STORE.transition_opportunity(
         opportunity_id,
         "EXECUTE",
@@ -4001,9 +4270,12 @@ Respond with JSON only:
             "AI generating PR improvement for %s (attempt %d, timeout=%ds)",
             candidate.full_name, attempt, timeout,
         )
+        _active_prompt = prompt
+        if _structural_retry_hint:
+            _active_prompt = prompt + f"\n\n[RETRY CONSTRAINT — previous attempt violated this]\n{_structural_retry_hint}"
         try:
             before_tokens = _usage_tokens()
-            raw = call_ai(prompt, timeout=timeout)
+            raw = call_ai(_active_prompt, timeout=timeout)
             _record_stage_token_spend("generate", before_tokens)
             result = _parse_json(raw)
             _ENGINE_STORE.record_attempt(opportunity_id, "EXECUTE", attempt, "parsed", "AI produced a candidate patch.")
@@ -4085,6 +4357,26 @@ Respond with JSON only:
             review_rejection_count += 1
             _bump_run_metric("self_review_rejected")
             _ENGINE_STORE.record_attempt(opportunity_id, "VERIFY", attempt, "structural_review_rejected", structural_rejection)
+            if "did not modify the chosen target file" in structural_rejection:
+                _structural_retry_hint = (
+                    f"CRITICAL: Your changed_files MUST include the key '{opportunity.target_file}' "
+                    f"(exactly as written, no path prefix changes). "
+                    f"Do not modify any other file unless it is the test file. "
+                    f"Return the complete new content of '{opportunity.target_file}' with the fix applied."
+                )
+            if _is_terminal_structural_rejection(structural_rejection):
+                _ENGINE_STORE.reject_opportunity(
+                    _ACTIVE_RUN_ID,
+                    opportunity,
+                    "self_review_rejected",
+                    f"{structural_rejection} (structural retry kill switch engaged)",
+                    "VERIFY",
+                    opportunity_id=opportunity_id,
+                )
+                raise PRGeneratorError(
+                    "Structural review rejected this target. "
+                    f"Structural retry kill switch engaged: {structural_rejection}"
+                )
             if review_rejection_count >= max_review_rejections:
                 _ENGINE_STORE.reject_opportunity(
                     _ACTIVE_RUN_ID,

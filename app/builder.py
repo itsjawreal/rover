@@ -547,6 +547,16 @@ def _human_approval_required(args: argparse.Namespace) -> bool:
     return _env_bool("ROVER_HUMAN_APPROVAL") or _env_bool("CONTRIB_HUMAN_APPROVAL")
 
 
+def _is_terminal_generation_failure(exc: PRGeneratorError) -> bool:
+    message = str(exc).lower()
+    terminal_markers = (
+        "structural retry kill switch engaged",
+        "patch did not modify the chosen target file",
+        "generated files were identical to the originals",
+    )
+    return any(marker in message for marker in terminal_markers)
+
+
 def _changed_file_summary(changed_files: dict[str, str]) -> str:
     files = list(changed_files)
     if not files:
@@ -554,6 +564,14 @@ def _changed_file_summary(changed_files: dict[str, str]) -> str:
     if len(files) <= 4:
         return ", ".join(files)
     return ", ".join(files[:4]) + f", +{len(files) - 4} more"
+
+
+def _repo_surface_summary(candidate: object) -> str:
+    files = getattr(candidate, "files", {}) or {}
+    py_count = sum(1 for path in files if str(path).endswith(".py"))
+    ts_count = sum(1 for path in files if str(path).endswith((".ts", ".tsx")))
+    test_count = sum(1 for path in files if "test" in str(path).lower())
+    return f"files={len(files)}  py={py_count}  ts={ts_count}  tests={test_count}"
 
 
 def _patch_risk_summary(changed_files: dict[str, str]) -> str:
@@ -775,12 +793,21 @@ def run_contribution_mode(args: argparse.Namespace, log: logging.Logger) -> dict
     pinned_candidate = None
     if repo_url:
         try:
+            print_item(f"target check  [bold]{repo_url}[/]")
             with _console.status(
                 _status_label(f"checking target repo: {repo_url}"),
                 spinner="dots",
                 spinner_style="dim cyan",
-            ):
-                pinned_candidate = fetch_repo_candidate(repo_url, log, override_limits=override_limits)
+            ) as _target_status:
+                def _target_status_cb(msg: str) -> None:
+                    _target_status.update(_status_label(msg))
+                pinned_candidate = fetch_repo_candidate(repo_url, log, override_limits=override_limits, status_cb=_target_status_cb)
+            print_ok(f"target ready  [bold]{pinned_candidate.full_name}[/]")
+            print_info(
+                f"stats   [dim]{pinned_candidate.stars}★  forks={getattr(pinned_candidate, 'forks', 0)}  "
+                f"{pinned_candidate.license}  pushed={pinned_candidate.pushed_days_ago}d ago[/]"
+            )
+            print_info(f"surface [dim]{_repo_surface_summary(pinned_candidate)}[/]")
         except ScraperError as exc:
             print_err(f"cannot use target repo: {exc}")
             log.info("Cannot use target repo %r: %s", repo_url, exc)
@@ -820,6 +847,9 @@ def run_contribution_mode(args: argparse.Namespace, log: logging.Logger) -> dict
         target,
         external_run_id=str(getattr(args, "external_run_id", "") or ""),
     )
+    if isinstance(run_id, int):
+        print_info(f"  run     [dim]#{run_id}[/]")
+        print_blank()
 
     submitted = 0
     attempts = 0
@@ -831,6 +861,7 @@ def run_contribution_mode(args: argparse.Namespace, log: logging.Logger) -> dict
     while submitted < target and attempts < max_attempts:
         attempts += 1
         log.info("Contribution %d/%d (attempt %d)", submitted + 1, target, attempts)
+        print_item(f"[dim][{submitted + 1}/{target}][/] attempt  [dim]{attempts}/{max_attempts}[/]")
 
         if pinned_candidate:
             candidate = pinned_candidate
@@ -868,6 +899,7 @@ def run_contribution_mode(args: argparse.Namespace, log: logging.Logger) -> dict
             candidate.license,
             candidate.pushed_days_ago,
         )
+        print_info(f"surface [dim]{_repo_surface_summary(candidate)}[/]")
 
         if not is_own and not can_submit_contribution_to_repo(candidate.full_name):
             existing_pr = _known_open_pr(candidate.full_name)
@@ -891,7 +923,8 @@ def run_contribution_mode(args: argparse.Namespace, log: logging.Logger) -> dict
                 )
             continue
 
-        print_item(f"[dim][{submitted + 1}/{target}][/] generating patch with AI ...")
+        print_item(f"[dim][{submitted + 1}/{target}][/] scanning opportunities and generating patch with AI ...")
+        print_info("stage   [dim]qualify → plan → generate → structural review[/]")
         try:
             improvement = generate_pr_improvement(
                 candidate,
@@ -904,6 +937,10 @@ def run_contribution_mode(args: argparse.Namespace, log: logging.Logger) -> dict
             print_warn(f"[{submitted + 1}/{target}] generation failed: {exc}")
             log.info("Generation failed for %s: %s", candidate.full_name, exc)
             if pinned_candidate:
+                if _is_terminal_generation_failure(exc):
+                    print_err("pinned target hit a terminal structural rejection — stopping")
+                    log.info("Pinned target hit terminal structural rejection; stopping: %s", exc)
+                    break
                 pinned_failures += 1
                 if pinned_failures >= 3:
                     print_err(f"pinned target failed {pinned_failures} times — stopping")
@@ -911,32 +948,93 @@ def run_contribution_mode(args: argparse.Namespace, log: logging.Logger) -> dict
                     break
             continue
 
+        print_item(f"[dim][{submitted + 1}/{target}][/] validating generated patch ...")
+        print_info(f"files   [dim]{_changed_file_summary(improvement.changed_files)}[/]")
+        print_info(f"risk    [dim]{_patch_risk_summary(improvement.changed_files)}[/]")
+
+        # Multi-turn repair loop — max iterations depend on pattern policy
+        _REPAIR_MAX: dict[str, int] = {"live-safe": 3}
+        _repair_max = _REPAIR_MAX.get(getattr(improvement, "execution_mode", ""), 2)
+        _repair_attempt = 0
+        _sandbox_passed = False
+        _error_ctx = ""
+        from dataclasses import replace as _dc_replace
+
         sandbox = run_sandbox_validation(improvement.changed_files)
-        if not sandbox.sandbox_verified and sandbox.sandbox_output:
-            log.info("Sandbox failed for %s; attempting self-debug retry.", candidate.full_name)
-            from dataclasses import replace as _dc_replace
-            retry_candidate = _dc_replace(
-                candidate,
-                description=f"{candidate.description} [SANDBOX_ERROR] {sandbox.sandbox_output[:300]}",
-            )
-            try:
-                retry_improvement = generate_pr_improvement(
-                    retry_candidate,
-                    log,
-                    char_budget=20_000 if is_own else 40_000,
-                    goal=args.goal,
-                    targeted_mode=bool(repo_url),
+        if sandbox.sandbox_verified:
+            _sandbox_passed = True
+            print_ok(f"[dim][{submitted + 1}/{target}][/] sandbox validation passed")
+        elif not sandbox.sandbox_output:
+            # Non-actionable (infra/import error) — skip repair, proceed as-is
+            print_warn(f"[{submitted + 1}/{target}] sandbox failed (non-actionable) — proceeding")
+            log.info("Sandbox non-actionable failure for %s — skipping repair loop.", candidate.full_name)
+        else:
+            _error_ctx = sandbox.sandbox_output
+            _repair_candidate = candidate
+            while _repair_attempt < _repair_max - 1 and _error_ctx:
+                _repair_attempt += 1
+                print_warn(
+                    f"[{submitted + 1}/{target}] sandbox failed — repair attempt "
+                    f"{_repair_attempt}/{_repair_max - 1}"
                 )
-                retry_sandbox = run_sandbox_validation(retry_improvement.changed_files)
-                if retry_sandbox.sandbox_verified:
-                    improvement = retry_improvement
-                    log.info("Self-debug retry succeeded for %s (sandbox_retry_success).", candidate.full_name)
-                else:
-                    log.info("Self-debug retry still failing for %s (sandbox_retry_failed).", candidate.full_name)
-            except PRGeneratorError as _retry_exc:
-                log.info("Self-debug retry generation failed for %s: %s", candidate.full_name, _retry_exc)
+                log.info(
+                    "Repair loop attempt %d/%d for %s.",
+                    _repair_attempt, _repair_max - 1, candidate.full_name,
+                )
+                _repair_candidate = _dc_replace(
+                    _repair_candidate,
+                    description=(
+                        f"{candidate.description} "
+                        f"[SANDBOX_ERROR_ITER_{_repair_attempt}] {_error_ctx[:300]}"
+                    ),
+                )
+                try:
+                    _retry_imp = generate_pr_improvement(
+                        _repair_candidate,
+                        log,
+                        char_budget=20_000 if is_own else 40_000,
+                        goal=args.goal,
+                        targeted_mode=bool(repo_url),
+                    )
+                    _retry_sb = run_sandbox_validation(_retry_imp.changed_files)
+                    improvement = _retry_imp
+                    if _retry_sb.sandbox_verified:
+                        _sandbox_passed = True
+                        print_ok(
+                            f"[dim][{submitted + 1}/{target}][/] sandbox repair passed "
+                            f"(iter {_repair_attempt})"
+                        )
+                        log.info(
+                            "repair_loop_success_iter_%d for %s.",
+                            _repair_attempt, candidate.full_name,
+                        )
+                        break
+                    else:
+                        _error_ctx = _retry_sb.sandbox_output or _error_ctx
+                        log.info(
+                            "Repair attempt %d still failing for %s.",
+                            _repair_attempt, candidate.full_name,
+                        )
+                except PRGeneratorError as _repair_exc:
+                    log.info(
+                        "Repair attempt %d generation failed for %s: %s",
+                        _repair_attempt, candidate.full_name, _repair_exc,
+                    )
+                    break
+            if not _sandbox_passed:
+                log.info(
+                    "repair_loop_exhausted for %s after %d attempt(s) — proceeding with best patch.",
+                    candidate.full_name, _repair_attempt + 1,
+                )
+                print_warn(
+                    f"[{submitted + 1}/{target}] repair exhausted after "
+                    f"{_repair_attempt + 1} attempt(s) — using best patch"
+                )
 
         print_ok(f"[dim][{submitted + 1}/{target}][/] patch ready   [bold]{improvement.title}[/]")
+        print_info(f"type    [dim]{improvement.improvement_type}[/]")
+        if getattr(improvement, "target_file", ""):
+            print_info(f"target  [dim]{improvement.target_file}[/]")
         log.info("Type: %s | Title: %s", improvement.improvement_type, improvement.title)
         log.info("Rationale: %s", improvement.rationale)
         log.info("Files: %s", list(improvement.changed_files.keys()))

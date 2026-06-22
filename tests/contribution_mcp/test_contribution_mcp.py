@@ -33,6 +33,12 @@ class ContributionMCPToolsTests(unittest.TestCase):
             "get_logs",
             "get_config",
             "update_config",
+            "start_pr_monitor",
+            "stop_pr_monitor",
+            "get_pr_monitor_status",
+            "start_telegram_bot",
+            "stop_telegram_bot",
+            "get_telegram_bot_status",
         }
         self.assertEqual(expected, set(self.tools))
 

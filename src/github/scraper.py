@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import base64
+import io
 import logging
 import os
 import json
 import shutil
 import subprocess
 import time
+import zipfile
+from http.client import RemoteDisconnected
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlencode, urlparse
 
 import requests
@@ -173,6 +176,15 @@ def _gh_get_via_cli(url: str, params: dict | None = None, timeout: int = 20) -> 
         raise ScraperError(f"GitHub CLI returned invalid JSON for {endpoint}") from exc
 
 
+def _retry_github_api(url: str, params: dict | None, timeout: int, retry: int, reason: str) -> Any:
+    if retry < 2:
+        wait = 5 * (2 ** retry)
+        log.warning("GitHub API transient connection error; retry %d/2 in %ds: %s", retry + 1, wait, reason)
+        time.sleep(wait)
+        return _gh_get(url, params, min(timeout * 2, 60), retry + 1)
+    raise ScraperError(f"GitHub API connection failed after retries: {reason}")
+
+
 def _gh_get(url: str, params: dict | None = None, timeout: int = 15, _retry: int = 0) -> Any:
     token = resolve_github_token()
     if not token and _gh_cli_available():
@@ -185,13 +197,15 @@ def _gh_get(url: str, params: dict | None = None, timeout: int = 15, _retry: int
             timeout=timeout,
             proxies=_request_proxies(),
         )
-    except requests.exceptions.Timeout:
-        if _retry < 2:
-            wait = 10 * (2 ** _retry)
-            log.warning("GitHub API timeout; retry %d/2 in %ds", _retry + 1, wait)
-            time.sleep(wait)
-            return _gh_get(url, params, timeout * 2, _retry + 1)
-        raise
+    except requests.exceptions.Timeout as exc:
+        return _retry_github_api(url, params, timeout, _retry, f"timeout: {exc}")
+    except (
+        requests.exceptions.ConnectionError,
+        requests.exceptions.ChunkedEncodingError,
+        requests.exceptions.ContentDecodingError,
+        RemoteDisconnected,
+    ) as exc:
+        return _retry_github_api(url, params, timeout, _retry, str(exc))
 
     if resp.status_code in (403, 429):
         body = resp.text.lower()
@@ -238,6 +252,58 @@ def _decode_blob(content: str) -> str:
     return base64.b64decode(content.encode("utf-8")).decode("utf-8", errors="replace")
 
 
+# In-memory cache: (full_name, branch) → files dict.
+# Survives across retry attempts within the same process — no re-download on failure.
+_REPO_FILE_CACHE: dict[tuple[str, str], dict[str, str]] = {}
+
+
+def _gh_download_zipball(full_name: str, ref: str, timeout: int = 90) -> bytes:
+    """Download repo as a single ZIP via GitHub archive endpoint."""
+    url = f"{_GITHUB_API}/repos/{full_name}/zipball/{ref}"
+    token = resolve_github_token()
+    resp = _http_get(
+        url,
+        headers=_gh_headers(),
+        timeout=timeout,
+        proxies=_request_proxies(),
+        allow_redirects=True,
+        stream=False,
+    )
+    if resp.status_code == 404:
+        raise ScraperError(f"Zipball 404 for {full_name}@{ref}")
+    resp.raise_for_status()
+    return resp.content
+
+
+def _extract_zipball(
+    data: bytes,
+    allowed_exts: tuple[str, ...],
+    max_files: int,
+) -> dict[str, str]:
+    """Extract text files from a GitHub zipball (strips the top-level prefix dir)."""
+    files: dict[str, str] = {}
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        for entry in zf.infolist():
+            if entry.is_dir():
+                continue
+            # GitHub zips have a single top-level dir like "owner-repo-sha1234/"
+            parts = entry.filename.split("/", 1)
+            if len(parts) < 2 or not parts[1]:
+                continue
+            path = parts[1]
+            if not path.endswith(allowed_exts):
+                continue
+            if _should_skip_path(path, entry.file_size):
+                continue
+            if len(files) >= max_files:
+                break
+            try:
+                files[path] = zf.read(entry).decode("utf-8", errors="replace")
+            except Exception:
+                continue
+    return files
+
+
 def download_repo_files(
     candidate: RepoCandidate,
     *,
@@ -245,43 +311,82 @@ def download_repo_files(
     max_total: int | None = None,
     allowed_exts: tuple[str, ...] | None = None,
     tree: dict | None = None,
+    status_cb: "Callable[[str], None] | None" = None,
 ) -> dict[str, str]:
+    _ALLOWED_EXTS = allowed_exts or (".py", ".ts", ".tsx", ".json", ".toml", ".txt", ".md", ".yml", ".yaml")
+    cache_key = (candidate.full_name, candidate.default_branch)
+
+    # Return cached copy if available — retry attempts reuse the same files, no re-download.
+    if cache_key in _REPO_FILE_CACHE and tree is None:
+        log.info("Using cached files for %s (%d files)", candidate.full_name, len(_REPO_FILE_CACHE[cache_key]))
+        cached = _REPO_FILE_CACHE[cache_key]
+        # Still enforce max_py / max_total against cached counts
+        if max_py is not None or max_total is not None:
+            pre_py = sum(1 for p in cached if p.endswith(".py"))
+            pre_total = len(cached)
+            if max_py is not None and pre_py > max_py:
+                raise ScraperError(f"Python surface too broad (py={pre_py} > {max_py} allowed).")
+            if max_total is not None and pre_total > max_total:
+                raise ScraperError(f"Repo too broad (total={pre_total} > {max_total} allowed).")
+        return cached
+
+    # Try zipball first: 1 HTTP request instead of N individual /contents calls.
+    # Falls back to per-file API if zipball is unavailable or fails.
+    if tree is None:
+        try:
+            if status_cb:
+                status_cb(f"downloading {candidate.full_name} (zip)...")
+            zip_data = _gh_download_zipball(candidate.full_name, candidate.default_branch)
+            files = _extract_zipball(zip_data, _ALLOWED_EXTS, _MAX_REPO_FILES)
+
+            if max_py is not None or max_total is not None:
+                pre_py = sum(1 for p in files if p.endswith(".py"))
+                pre_total = len(files)
+                if max_py is not None and pre_py > max_py:
+                    raise ScraperError(f"Python surface too broad (py={pre_py} > {max_py} allowed).")
+                if max_total is not None and pre_total > max_total:
+                    raise ScraperError(f"Repo too broad (total={pre_total} > {max_total} allowed).")
+
+            log.info("Zipball download complete: %d files for %s", len(files), candidate.full_name)
+            _REPO_FILE_CACHE[cache_key] = files
+            return files
+        except ScraperError:
+            raise
+        except Exception as exc:
+            log.warning("Zipball failed for %s (%s) — falling back to per-file API", candidate.full_name, exc)
+
+    # Per-file fallback: fetch tree then individual blobs
+    if status_cb:
+        status_cb(f"fetching file tree for {candidate.full_name}...")
     tree = tree or _gh_get(
         f"{_GITHUB_API}/repos/{candidate.full_name}/git/trees/{candidate.default_branch}",
         params={"recursive": "1"},
         timeout=30,
     )
-    _ALLOWED_EXTS = allowed_exts or (".py", ".ts", ".tsx", ".json", ".toml", ".txt", ".md", ".yml", ".yaml")
+
+    all_blobs = [
+        item for item in tree.get("tree", [])
+        if item.get("type") == "blob"
+        and not _should_skip_path(item.get("path", ""), int(item.get("size") or 0))
+        and item.get("path", "").endswith(_ALLOWED_EXTS)
+    ]
     if max_py is not None or max_total is not None:
-        eligible = [
-            item for item in tree.get("tree", [])
-            if item.get("type") == "blob"
-            and not _should_skip_path(item.get("path", ""), int(item.get("size") or 0))
-            and item.get("path", "").endswith(_ALLOWED_EXTS)
-        ]
-        pre_py = sum(1 for i in eligible if i.get("path", "").endswith(".py"))
-        pre_total = len(eligible)
+        pre_py = sum(1 for i in all_blobs if i.get("path", "").endswith(".py"))
+        pre_total = len(all_blobs)
         if max_py is not None and pre_py > max_py:
-            raise ScraperError(
-                f"Python surface too broad — skipping download (py={pre_py} > {max_py} allowed)."
-            )
+            raise ScraperError(f"Python surface too broad — skipping download (py={pre_py} > {max_py} allowed).")
         if max_total is not None and pre_total > max_total:
-            raise ScraperError(
-                f"Repo too broad — skipping download (total={pre_total} > {max_total} allowed)."
-            )
-    files: dict[str, str] = {}
+            raise ScraperError(f"Repo too broad — skipping download (total={pre_total} > {max_total} allowed).")
+
+    total_eligible = min(len(all_blobs), _MAX_REPO_FILES)
+    if status_cb:
+        status_cb(f"downloading files from {candidate.full_name} (0/{total_eligible})...")
+
+    files = {}
     skipped = 0
-    for item in tree.get("tree", []):
-        if item.get("type") != "blob":
-            continue
+    _STATUS_EVERY = 20
+    for item in all_blobs:
         path = item.get("path", "")
-        size = int(item.get("size") or 0)
-        if not path or _should_skip_path(path, size):
-            skipped += 1
-            continue
-        if not path.endswith((".py", ".ts", ".tsx", ".json", ".toml", ".txt", ".md", ".yml", ".yaml")):
-            skipped += 1
-            continue
         if len(files) >= _MAX_REPO_FILES:
             skipped += 1
             continue
@@ -291,8 +396,11 @@ def download_repo_files(
             skipped += 1
             continue
         files[path] = _decode_blob(encoded)
+        if status_cb and len(files) % _STATUS_EVERY == 0:
+            status_cb(f"downloading files from {candidate.full_name} ({len(files)}/{total_eligible})...")
 
     log.info("Download complete: %d files downloaded, %d skipped", len(files), skipped)
+    _REPO_FILE_CACHE[cache_key] = files
     return files
 
 

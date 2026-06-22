@@ -24,12 +24,16 @@ if str(_ROOT) not in sys.path:
 from src.core.command_router import parse_command_text  # noqa: E402
 from src.core.config import (
     LOG_DIR,
+    PR_MONITOR_INTERVAL_SECONDS,
     ROOT,
     ROVER_NOTIFY_INTERVAL_SECONDS,
     ROVER_NOTIFY_ON_EVENT_TYPES,
     ROVER_NOTIFY_ONLY_ON_CHANGE,
     ROVER_NOTIFY_PROGRESS,
     ROVER_NOTIFY_STALL_SECONDS,
+    TELEGRAM_BOT_ENABLED,
+    TELEGRAM_CHAT,
+    TELEGRAM_TOKEN,
 )  # noqa: E402
 from src.core.notify import (  # noqa: E402
     NotificationRoute,
@@ -46,6 +50,14 @@ _SECRET_KEYS = {"GH_TOKEN", "GITHUB_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT
 _RUNS: dict[str, "ManagedRun"] = {}
 _RUNS_LOCK = threading.Lock()
 _active_proc: subprocess.Popen[str] | None = None
+
+# ── PR monitor (delegated to src.core.pr_monitor) ────────────
+from src.core import pr_monitor as _pr_monitor  # noqa: E402
+
+# ── Telegram bot state ───────────────────────────────────────
+from src.core.telegram_bot import TelegramCommandBot  # noqa: E402
+_tg_bot: TelegramCommandBot | None = None
+_tg_bot_lock = threading.Lock()
 
 
 @dataclass
@@ -390,6 +402,17 @@ def _render_progress_bar(percent: int) -> str:
     return "[" + ("#" * filled) + ("-" * (blocks - filled)) + f"] {percent:>3d}%"
 
 
+def _current_repo_label(run: "ManagedRun") -> str:
+    """Return the most recently active owner/repo, or '(search mode)' if none seen yet."""
+    if run.repo:
+        return run.repo
+    for event in reversed(run.events):
+        repo = (event.get("details") or {}).get("repo_full_name")
+        if repo:
+            return repo
+    return "(search mode)"
+
+
 def _render_progress_card(run: ManagedRun) -> str:
     payload = _canonical_run_result(run)
     summary = dict(payload.get("summary") or {})
@@ -417,7 +440,7 @@ def _render_progress_card(run: ManagedRun) -> str:
         f"🕒 Last update at : {updated_at}",
         "",
         f"🆔 Run    : {_short_run_id(run.run_id)}",
-        f"📍 Repo   : {run.repo or '(search mode)'}",
+        f"📍 Repo   : {_current_repo_label(run)}",
         f"⚙️ State  : {state_label}",
         f"🎯 Goal   : {run.goal}",
         f"🚦 Mode   : {'dry-run' if run.dry_run else 'live'}",
@@ -458,7 +481,7 @@ def _render_terminal_summary(run: ManagedRun) -> str:
         f"🕒 Last update at : {updated_at}",
         "",
         f"🆔 Run      : {_short_run_id(run.run_id)}",
-        f"📍 Repo     : {run.repo or '(search mode)'}",
+        f"📍 Repo     : {_current_repo_label(run)}",
         f"🚦 Mode     : {'dry-run' if run.dry_run else 'live'}",
         f"🧪 Phase    : {phase_label}",
         f"🎯 Top narrowed candidate: {candidate_label}",
@@ -563,7 +586,7 @@ def _render_event_message(run: ManagedRun, event: dict[str, Any]) -> str:
     lines = [
         f"ROVER {str(event.get('type') or 'update').upper()}",
         f"Run: {run.run_id}",
-        f"Repo: {run.repo or '(search mode)'}",
+        f"Repo: {_current_repo_label(run)}",
         f"State: {run.state}",
         str(event.get("summary") or ""),
     ]
@@ -677,7 +700,7 @@ def _maybe_notify_stall(run: ManagedRun) -> None:
         [
             "ROVER STALLED",
             f"Run: {run.run_id}",
-            f"Repo: {run.repo or '(search mode)'}",
+            f"Repo: {_current_repo_label(run)}",
             f"State: {run.state}",
             f"Idle: {int(stalled_for)}s",
             f"Last: {last_summary or 'no recent progress event'}",
@@ -1235,7 +1258,86 @@ def update_config(key: str, value: str) -> dict[str, str]:
     return {"status": "updated", "key": key, "value": value}
 
 
+
+
+@mcp.tool()
+def start_pr_monitor(interval_seconds: int = 300) -> dict[str, Any]:
+    """Start background PR monitor that polls open PRs and sends Telegram notifications on comments, merges, or closes.
+
+    interval_seconds: how often to poll (default 300 = 5 minutes, minimum 60).
+    Returns immediately; polling runs in a daemon thread.
+    """
+    return _pr_monitor.start(interval_seconds)
+
+
+@mcp.tool()
+def stop_pr_monitor() -> dict[str, Any]:
+    """Stop the background PR monitor thread."""
+    return _pr_monitor.stop()
+
+
+@mcp.tool()
+def get_pr_monitor_status() -> dict[str, Any]:
+    """Return current state of the background PR monitor."""
+    return _pr_monitor.status()
+
+
+@mcp.tool()
+def start_telegram_bot() -> dict[str, Any]:
+    """Start the Telegram command bot so users can send commands from Telegram.
+
+    Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to be set in .env.
+    Returns immediately; the bot runs in a daemon thread.
+    """
+    global _tg_bot
+    with _tg_bot_lock:
+        if _tg_bot is not None and _tg_bot.running:
+            return {"status": "already_running", "chat_id": TELEGRAM_CHAT}
+        if not TELEGRAM_TOKEN:
+            return {"status": "error", "reason": "TELEGRAM_BOT_TOKEN not configured in .env"}
+        if not TELEGRAM_CHAT:
+            return {"status": "error", "reason": "TELEGRAM_CHAT_ID not configured in .env"}
+        _tg_bot = TelegramCommandBot(TELEGRAM_TOKEN, TELEGRAM_CHAT, ROOT)
+        _tg_bot.start()
+    return {"status": "started", "chat_id": TELEGRAM_CHAT}
+
+
+@mcp.tool()
+def stop_telegram_bot() -> dict[str, Any]:
+    """Stop the Telegram command bot."""
+    global _tg_bot
+    with _tg_bot_lock:
+        if _tg_bot is None or not _tg_bot.running:
+            return {"status": "not_running"}
+        _tg_bot.stop()
+    return {"status": "stopping"}
+
+
+@mcp.tool()
+def get_telegram_bot_status() -> dict[str, Any]:
+    """Return current state of the Telegram command bot."""
+    with _tg_bot_lock:
+        running = _tg_bot is not None and _tg_bot.running
+    return {
+        "running": running,
+        "chat_id": TELEGRAM_CHAT,
+        "token_configured": bool(TELEGRAM_TOKEN),
+    }
+
+
 def main() -> None:
+    if PR_MONITOR_INTERVAL_SECONDS > 0:
+        _pr_monitor.start(PR_MONITOR_INTERVAL_SECONDS)
+    if TELEGRAM_BOT_ENABLED:
+        if TELEGRAM_TOKEN and TELEGRAM_CHAT:
+            global _tg_bot
+            with _tg_bot_lock:
+                _tg_bot = TelegramCommandBot(TELEGRAM_TOKEN, TELEGRAM_CHAT, ROOT)
+                _tg_bot.start()
+        else:
+            logging.getLogger("mcp").warning(
+                "TELEGRAM_BOT_ENABLED=true but TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set"
+            )
     mcp.run()
 
 

@@ -96,16 +96,23 @@ metadata: {{"openclaw": {{"requires": {{"bins": ["python3"]}}}}}}
 - active profile / auth context: `profile`
 - latest contribution report: `contrib_report`
 - inspect one repo: `repo_inspect --repo owner/repo`
+- inspect one repo (cached): `repo_inspect --repo owner/repo --cached`
+- inspect one repo (force refresh): `repo_inspect --repo owner/repo --refresh`
 - security scan: `scan --repo owner/repo --kind security`
 - bug scan: `scan --repo owner/repo --kind bug`
 - trust scan: `scan --repo owner/repo --kind trust`
 - audit scan: `scan --repo owner/repo --kind audit`
+- list all submitted PRs: `list_prs`
+- list open PRs only: `list_prs --status open`
+- list merged PRs only: `list_prs --status merged`
+- list closed PRs only: `list_prs --status closed`
 - preview one queued contribution: `contrib_once --count 1`
 - preview one targeted contribution: `contrib_targeted --repo owner/repo --count 1`
 - live one queued contribution: `contrib_once --count 1 --live`
 - live one targeted contribution: `contrib_targeted --repo owner/repo --count 1 --live`
 - check maintainer feedback / PR state: `contrib_check`
 - respond to maintainer feedback: `contrib_respond`
+- test notification delivery: `test_notify`
 - route natural language safely: `route --text "buat 1 kontribusi"`
 - execute natural language request: `message --text "buat 1 kontribusi"`
 - explicit Rover prefix examples:
@@ -115,6 +122,7 @@ metadata: {{"openclaw": {{"requires": {{"bins": ["python3"]}}}}}}
   - `rover scan security owner/repo`
   - `rover scan trust owner/repo`
   - `rover scan owner/repo --kind audit`
+  - `rover list-prs open`
 
 ## Notes
 
@@ -186,6 +194,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     repo_inspect = sub.add_parser("repo_inspect")
     repo_inspect.add_argument("--repo", required=True)
+    repo_inspect.add_argument("--cached", action="store_true")
+    repo_inspect.add_argument("--refresh", action="store_true")
+
+    list_prs = sub.add_parser("list_prs")
+    list_prs.add_argument("--status", default="all", choices=("all", "open", "merged", "closed"))
+
+    sub.add_parser("test_notify")
 
     contrib_once = sub.add_parser("contrib_once")
     contrib_once.add_argument("--count", type=int, default=1)
@@ -227,7 +242,20 @@ def main() -> int:
     if args.command == "contrib_respond":
         return run_rover(["respond", "--json"])
     if args.command == "repo_inspect":
-        return run_rover(["inspect", args.repo, "--json"])
+        payload = ["inspect", args.repo, "--json"]
+        if args.cached:
+            payload.append("--cached")
+        if args.refresh:
+            payload.append("--refresh")
+        return run_rover(payload)
+    if args.command == "list_prs":
+        payload = ["list-prs"]
+        if args.status != "all":
+            payload.append(args.status)
+        payload.append("--json")
+        return run_rover(payload)
+    if args.command == "test_notify":
+        return run_rover(["--test-notify", "--json"])
     if args.command == "contrib_once":
         payload = ["run", str(args.count), "--goal", args.goal, "--json"]
         if args.first_pr:
