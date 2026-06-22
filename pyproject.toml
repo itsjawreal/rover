@@ -1,13 +1,14 @@
 [project]
-name = "github-contribution-engine"
+name = "rover"
 version = "0.1.0"
-description = "Acceptance-first GitHub contribution engine with CLI and MCP entrypoints."
+description = "Autonomous GitHub contribution agent — scans, patches, submits, and learns."
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 keywords = ["mcp", "github", "pull-request", "automation", "agent", "contribution"]
 classifiers = [
   "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Topic :: Software Development :: Version Control :: Git",
@@ -19,12 +20,13 @@ dependencies = [
 ]
 
 [project.scripts]
-github-contribution-engine = "app.builder:main"
-contribution-mcp = "src.contribution_mcp.server:main"
+rover = "app.contribute:main"
+rover-engine = "app.builder:main"
+rover-mcp = "src.contribution_mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/BigNounce90/github-contribution-engine"
-Repository = "https://github.com/BigNounce90/github-contribution-engine"
+Homepage = "https://github.com/BigNounce90/rover"
+Repository = "https://github.com/BigNounce90/rover"
 
 [build-system]
 requires = ["hatchling"]

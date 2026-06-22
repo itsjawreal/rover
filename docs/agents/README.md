@@ -22,10 +22,12 @@ Available notes:
 
 - [codex.md](codex.md)
 - [claude-code.md](claude-code.md)
+- [hermes.md](hermes.md)
 - [openclaw.md](openclaw.md)
 
 Support level today:
 
 - Codex: tested default path
 - Claude Code: supported fallback path
-- OpenClaw and other tool labels: document-first path until a real adapter exists
+- OpenClaw: supported MCP plus native wrapper path
+- Hermes and other MCP-capable agent shells: supported through the Rover MCP server

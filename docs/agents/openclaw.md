@@ -23,20 +23,21 @@ OpenClaw is a documented integration target for operator-specific use.
 - add concrete setup notes only when they are verified
 - prefer calling the MCP tools in `src.contribution_mcp.server` over sending raw shell commands
 - use `route_command` first when the user speaks in natural language instead of canonical action names
+- prefer `contrib_once` and `contrib_targeted` over the lower-level `run_contribution` tool when the action is already known
 
 ## Install Path
 
 Recommended install command:
 
 ```powershell
-uv tool install git+https://github.com/BigNounce90/github-contribution-engine.git
+uv tool install git+https://github.com/BigNounce90/rover.git
 ```
 
 Verify the installed commands:
 
 ```powershell
-github-contribution-engine --doctor
-contribution-mcp
+rover --doctor
+rover-mcp
 ```
 
 If the commands are not found after install, make sure uv's bin directory is on `PATH`.
@@ -50,11 +51,12 @@ bash scripts/install_vps.sh
 That setup flow can install:
 
 - the Python environment
-- `github-contribution-engine`
-- `contribution-mcp`
-- `~/.openclaw/workspace/skills/github-contribution-engine/SKILL.md` when the OpenClaw workspace exists
-- fallback: `~/.openclaw/skills/github-contribution-engine/SKILL.md`
-- `~/.openclaw/tools/contribution.py`
+- `rover`
+- `rover-mcp`
+- `~/.openclaw/workspace/skills/rover/SKILL.md` when the OpenClaw workspace exists
+- fallback: `~/.openclaw/skills/rover/SKILL.md`
+- `~/.openclaw/tools/rover.py`
+- `~/.openclaw/openclaw.json` with `mcp.servers.rover`
 
 ## OpenClaw MCP Config
 
@@ -62,16 +64,12 @@ If your OpenClaw environment supports standard MCP server registration, use:
 
 ```json
 {
-  "mcpServers": {
-    "contribution-engine": {
-      "command": "uv",
-      "args": [
-        "tool",
-        "run",
-        "--from",
-        "git+https://github.com/BigNounce90/github-contribution-engine.git",
-        "contribution-mcp"
-      ]
+  "mcp": {
+    "servers": {
+      "rover": {
+        "command": "/absolute/path/to/rover-mcp",
+        "args": []
+      }
     }
   }
 }
@@ -79,17 +77,18 @@ If your OpenClaw environment supports standard MCP server registration, use:
 
 ## OpenClaw Native Skill
 
-This repo also supports a native OpenClaw wrapper path, modeled after `wallet-mcp`.
+This repo also supports a native OpenClaw wrapper path for direct Rover workflows.
 
 Installed files:
 
-- preferred: `~/.openclaw/workspace/skills/github-contribution-engine/SKILL.md`
-- fallback: `~/.openclaw/skills/github-contribution-engine/SKILL.md`
-- `~/.openclaw/tools/contribution.py`
+- preferred: `~/.openclaw/workspace/skills/rover/SKILL.md`
+- fallback: `~/.openclaw/skills/rover/SKILL.md`
+- `~/.openclaw/tools/rover.py`
+- compatibility aliases under `github-contribution-engine`
 
 The installed `SKILL.md` now uses the official OpenClaw YAML frontmatter format so gateway skill discovery matches the current OpenClaw docs.
 
-The native wrapper is useful when your Telegram / Discord / OpenClaw agent behaves like a general chat assistant instead of calling MCP tools directly.
+The native wrapper is optional. The primary automation path is MCP via `mcp.servers.rover`. Use the wrapper only when your Telegram / Discord / OpenClaw agent behaves like a general chat assistant instead of calling MCP tools directly.
 
 Preferred commands from that skill:
 
@@ -99,22 +98,18 @@ Preferred commands from that skill:
 - `message --text "buat 1 kontribusi"`
 - `message --text "tampilkan report kontribusi terakhir"`
 
-For natural-language chat channels, `message --text "..."`
-is the safest default because it lets the engine route the request first.
+For natural-language chat channels, `route --text "..."` is the safest first step. Use `message --text "..."` only when you intentionally want a synchronous direct Rover call instead of MCP background execution.
 
 Local clone variant:
 
 ```json
 {
-  "mcpServers": {
-    "contribution-engine": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/path/to/github-contribution-engine",
-        "run",
-        "contribution-mcp"
-      ]
+  "mcp": {
+    "servers": {
+      "rover": {
+        "command": "/path/to/rover/.venv/bin/rover-mcp",
+        "args": []
+      }
     }
   }
 }
@@ -145,7 +140,10 @@ Example:
 
 - natural-language contribution requests default to preview mode unless the request explicitly asks for live submission
 - `route_command` is safer than forwarding raw shell commands from chat
-- keep GitHub auth and local CLI readiness healthy by checking `github-contribution-engine --doctor`
+- keep GitHub auth and local CLI readiness healthy by checking `rover --doctor`
+- do not write artifacts into `~/.openclaw/sandboxes/...` unless that path is explicitly known writable
+- prefer plain text / JSON replies when no saved artifact is required
+- if a file is required, choose a real writable repo or workspace path instead of an internal OpenClaw sandbox path
 
 ## Known Boundary
 

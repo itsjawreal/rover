@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "crypto-builder": {
+      "command": "wsl",
+      "args": [
+        "-d", "YOUR_WSL_DISTRO",
+        "--", "bash", "-c",
+        "cd /YOUR/PROJECT/PATH && python3 -m src.contribution_mcp.server"
+      ],
+      "type": "stdio"
+    }
+  }
+}

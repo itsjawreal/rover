@@ -1,0 +1,31 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ROVER: Agent Cycle",
+      "type": "shell",
+      "command": "python scripts/rover_agents.py start \"${input:agentGoal}\"",
+      "problemMatcher": []
+    },
+    {
+      "label": "ROVER: Agent Status",
+      "type": "shell",
+      "command": "python scripts/rover_agents.py status",
+      "problemMatcher": []
+    },
+    {
+      "label": "ROVER: Config Check",
+      "type": "shell",
+      "command": "python scripts/rover_agents.py config-check",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "agentGoal",
+      "type": "promptString",
+      "description": "What should Claude + Codex work on?",
+      "default": "continue existing code, find the next safest improvement, implement it, test it, review it"
+    }
+  ]
+}

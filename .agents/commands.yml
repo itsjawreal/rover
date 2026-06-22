@@ -1,0 +1,19 @@
+# Configure your local Claude/Codex CLI commands here.
+#
+# Common examples:
+#   claude.command: "claude -p"
+#   codex.command: "codex"
+#
+# If your Codex CLI needs a flag, edit it here:
+#   codex.command: "codex exec"
+#
+# If your Claude CLI uses another binary/path:
+#   claude.command: "/usr/local/bin/claude -p"
+
+claude:
+  command: "claude -p"
+
+codex:
+  command: "codex"
+
+timeout_seconds: 900

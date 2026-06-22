@@ -1,5 +1,17 @@
 # Contribution Engine Flow
 
+## Core Principles
+
+- Acceptance rate > PR volume
+- Evidence before patch
+- Small targeted fixes > broad refactors
+- Maintainer trust > automation speed
+- One clear failure mode per PR
+- No speculative changes
+- No "AI-looking" overengineering
+
+---
+
 ## 1. Discover
 
 Search GitHub for active repositories that match the configured contribution lane.
@@ -98,8 +110,6 @@ The engine records:
 
 SQLite memory updates repo scoring, cooldowns, pattern outcomes, hotspots, and run summaries.
 
-Use:
-
-```powershell
+```bash
 python -m app.builder --contrib-report
 ```

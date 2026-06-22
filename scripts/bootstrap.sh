@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-git@github.com:BigNounce90/github-contribution-engine.git}"
-HTTPS_REPO_URL="${HTTPS_REPO_URL:-https://github.com/BigNounce90/github-contribution-engine.git}"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/github-contribution-engine}"
+REPO_URL="${REPO_URL:-git@github.com:BigNounce90/rover.git}"
+HTTPS_REPO_URL="${HTTPS_REPO_URL:-https://github.com/BigNounce90/rover.git}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/rover}"
 
 log() {
   printf '[bootstrap] %s\n' "$1"

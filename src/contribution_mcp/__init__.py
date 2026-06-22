@@ -1,1 +1,1 @@
-"""MCP server package for the GitHub contribution engine."""
+"""MCP server package — exposes the contribution engine to Claude, OpenClaw, and other MCP clients."""

@@ -1,18 +1,11 @@
-# secrets
+# secrets and local machine config
 .env
+.mcp.json
 
 # runtime state (temp files, not source)
-data/idea.json
-data/signal.json
-pending.json
-data/.checkpoint.json
-data/.strategy_cache.json
-data/.validated_snapshot.json
-data/builds.json
-data/adoption_memory.json
-data/feedback_signals.json
-data/security_blacklist.json
-data/project_blacklist.json
+data/*.json
+data/*.sqlite3
+data/.ai_prompts/
 .stream_partials/
 
 # output / review
@@ -28,6 +21,7 @@ logs/
 
 # python
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo
 *.egg-info/
@@ -36,3 +30,6 @@ build/
 .venv/
 venv/
 .codex/
+
+# cross-platform editor / filesystem residue
+*:Zone.Identifier

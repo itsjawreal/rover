@@ -34,10 +34,10 @@ venv_activate_script() {
 venv_engine_bin() {
   local bin_dir
   bin_dir="$(venv_bin_dir)"
-  if [ -x "$bin_dir/github-contribution-engine.exe" ]; then
-    printf '%s' "$bin_dir/github-contribution-engine.exe"
+  if [ -x "$bin_dir/rover-engine.exe" ]; then
+    printf '%s' "$bin_dir/rover-engine.exe"
   else
-    printf '%s' "$bin_dir/github-contribution-engine"
+    printf '%s' "$bin_dir/rover-engine"
   fi
 }
 
@@ -57,9 +57,16 @@ else
   C_MAGENTA=""
 fi
 
+on_interrupt() {
+  printf '\n%s[warn]%s Setup interrupted by user.\n' "$C_YELLOW" "$C_RESET" >&2
+  exit 130
+}
+
+trap on_interrupt INT
+
 banner() {
-  printf '\n%s%sGitHub Contribution Engine Setup%s\n' "$C_BOLD" "$C_MAGENTA" "$C_RESET"
-  printf '%sAcceptance-first installer for VPS and MCP usage%s\n\n' "$C_BLUE" "$C_RESET"
+  printf '\n%s%s♦ rover setup%s\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
+  printf '%sautonomous GitHub contribution agent — installer%s\n\n' "$C_BLUE" "$C_RESET"
 }
 
 section() {
@@ -91,6 +98,51 @@ has_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+codex_cmd_is_windows_path() {
+  local cmd_path="${1:-}"
+  case "$cmd_path" in
+    /mnt/[a-zA-Z]/*|*.exe|*.cmd)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+linux_codex_cmd() {
+  local env_cmd="${CODEX_CMD:-}"
+  if [ -n "$env_cmd" ] && [ -x "$env_cmd" ] && ! codex_cmd_is_windows_path "$env_cmd"; then
+    printf '%s' "$env_cmd"
+    return 0
+  fi
+
+  local path_cmd
+  path_cmd="$(command -v codex 2>/dev/null || true)"
+  if [ -n "$path_cmd" ] && ! codex_cmd_is_windows_path "$path_cmd"; then
+    printf '%s' "$path_cmd"
+    return 0
+  fi
+
+  if has_cmd npm; then
+    local npm_prefix
+    npm_prefix="$(npm prefix -g 2>/dev/null || true)"
+    if [ -n "$npm_prefix" ] && [ -x "$npm_prefix/bin/codex" ]; then
+      printf '%s' "$npm_prefix/bin/codex"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+codex_cli_usable() {
+  local cmd_path
+  cmd_path="$(linux_codex_cmd 2>/dev/null || true)"
+  [ -n "$cmd_path" ] || return 1
+  "$cmd_path" --help >/dev/null 2>&1
+}
+
 is_headless_environment() {
   [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_TTY:-}" ] || [ -z "${DISPLAY:-}" ]
 }
@@ -103,13 +155,15 @@ PY
 }
 
 codex_login_ready() {
-  if ! has_cmd codex; then
+  local codex_cmd
+  codex_cmd="$(linux_codex_cmd 2>/dev/null || true)"
+  if [ -z "$codex_cmd" ]; then
     return 1
   fi
   if [ -n "${OPENAI_API_KEY:-}" ]; then
     return 0
   fi
-  codex login status >/dev/null 2>&1
+  "$codex_cmd" login status >/dev/null 2>&1
 }
 
 update_env() {
@@ -249,13 +303,9 @@ prompt_env_value() {
 
 confirm() {
   local prompt="$1"
-  local answer=""
-  read -r -p "$prompt [Y/n] " answer
-  answer="${answer:-Y}"
-  case "${answer,,}" in
-    y|yes) return 0 ;;
-    *) return 1 ;;
-  esac
+  local choice
+  choice="$(choose_option "$prompt" "Yes" "No")"
+  [ "$choice" = "Yes" ]
 }
 
 choose_option() {
@@ -314,7 +364,12 @@ choose_option() {
   line_count=$((line_count + 4))
   _render_option_picker "$selected"
   while true; do
-    IFS= read -rsn1 key <"$tty_device"
+    if ! IFS= read -rsn1 key <"$tty_device"; then
+      printf '\n' >"$tty_device"
+      printf '%s[warn]%s Prompt input was interrupted or the terminal is no longer interactive. Stopping setup.\n' \
+        "$C_YELLOW" "$C_RESET" >"$tty_device"
+      return 130
+    fi
     case "$key" in
       "")
         printf '%s' "${options[$selected]}"
@@ -322,7 +377,12 @@ choose_option() {
         return 0
         ;;
       $'\x1b')
-        IFS= read -rsn2 key <"$tty_device" || true
+        if ! IFS= read -rsn2 key <"$tty_device"; then
+          printf '\n' >"$tty_device"
+          printf '%s[warn]%s Prompt input was interrupted or the terminal is no longer interactive. Stopping setup.\n' \
+            "$C_YELLOW" "$C_RESET" >"$tty_device"
+          return 130
+        fi
         case "$key" in
           "[A")
             if [ "$selected" -gt 0 ]; then
@@ -382,10 +442,45 @@ install_uv_if_missing() {
   warn "curl not available; skipping uv install"
 }
 
-install_codex_if_requested() {
-  if has_cmd codex; then
-    log "codex already available"
+ensure_user_npm_global() {
+  if ! has_cmd npm; then
+    return 1
+  fi
+
+  local current_prefix
+  current_prefix="$(npm config get prefix 2>/dev/null || true)"
+  if [ -n "$current_prefix" ] && [ -w "$current_prefix" ]; then
     return 0
+  fi
+
+  local desired_prefix="$HOME/.local/npm"
+  mkdir -p "$desired_prefix/bin" "$desired_prefix/lib"
+  export npm_config_prefix="$desired_prefix"
+  export NPM_CONFIG_PREFIX="$desired_prefix"
+  export PATH="$desired_prefix/bin:$PATH"
+  log "using temporary npm global prefix at $desired_prefix"
+}
+
+install_codex_if_requested() {
+  local existing_cmd
+  existing_cmd="$(command -v codex 2>/dev/null || true)"
+  if codex_cli_usable; then
+    local usable_cmd
+    usable_cmd="$(linux_codex_cmd)"
+    export CODEX_CMD="$usable_cmd"
+    update_env "CODEX_CMD" "$usable_cmd"
+    log "codex already available at $usable_cmd"
+    return 0
+  fi
+  if [ -n "$existing_cmd" ]; then
+    if codex_cmd_is_windows_path "$existing_cmd"; then
+      warn "Found Codex CLI at $existing_cmd from a Windows-mounted PATH."
+      hint "That Codex binary cannot complete Linux/WSL auth here."
+      hint "Rover will install or prefer a Linux Codex CLI for this environment."
+    else
+      warn "Found Codex CLI at $existing_cmd but it is not usable in this Linux environment."
+      hint "Rover will reinstall Codex CLI for Linux/WSL."
+    fi
   fi
   if ! confirm "Install Codex CLI now?"; then
     warn "Skipping Codex CLI install"
@@ -394,31 +489,60 @@ install_codex_if_requested() {
   apt_install_if_missing nodejs node
   apt_install_if_missing npm npm
   if has_cmd npm; then
+    if ! ensure_user_npm_global; then
+      warn "Could not switch npm global installs to a user-writable prefix"
+      hint "Run 'export npm_config_prefix=~/.local/npm' and add ~/.local/npm/bin to PATH, then rerun rover setup."
+      return 0
+    fi
     log "installing Codex CLI via npm"
-    npm install -g @openai/codex
+    npm install -g @openai/codex@latest
+    local installed_cmd
+    installed_cmd="$(linux_codex_cmd 2>/dev/null || true)"
+    if [ -n "$installed_cmd" ]; then
+      export CODEX_CMD="$installed_cmd"
+      update_env "CODEX_CMD" "$installed_cmd"
+      ok "Codex CLI ready at $installed_cmd"
+    else
+      warn "Codex CLI install finished, but no Linux/WSL codex binary was found"
+      hint "Check npm global bin and PATH, then rerun rover setup."
+    fi
   else
     warn "npm not available; cannot install Codex CLI automatically"
   fi
 }
 
 configure_github_auth() {
-  if confirm "Configure GitHub token now?"; then
-    prompt_env_value "GITHUB_TOKEN" "Enter GITHUB_TOKEN (input hidden):" true
-  fi
-  if [ -n "${GITHUB_TOKEN:-}" ]; then
+  local auth_choice
+  auth_choice="$(choose_option "Select GitHub auth mode for Rover:" \
+    "Token in .env only" \
+    "gh auth login only" \
+    "Both token + gh auth login" \
+    "Skip GitHub auth for now")"
+
+  case "$auth_choice" in
+    "Token in .env only")
+      prompt_env_value "GITHUB_TOKEN" "Enter GITHUB_TOKEN (input hidden):" true
+      ;;
+    "gh auth login only")
+      log "Skipping token prompt; will rely on gh auth"
+      ;;
+    "Both token + gh auth login")
+      prompt_env_value "GITHUB_TOKEN" "Enter GITHUB_TOKEN (input hidden):" true
+      ;;
+    "Skip GitHub auth for now")
+      warn "Skipping GitHub auth setup"
+      ;;
+  esac
+
+  if [ -n "${GITHUB_TOKEN:-}" ] && [ -z "${GH_TOKEN:-}" ]; then
     export GH_TOKEN="$GITHUB_TOKEN"
   fi
 
   if has_cmd gh; then
     if gh auth status >/dev/null 2>&1; then
       log "gh auth already active"
-    elif [ -n "${GITHUB_TOKEN:-}" ]; then
-      log "authenticating gh with provided token"
-      printf '%s' "$GITHUB_TOKEN" | gh auth login --with-token
-    elif confirm "Run interactive gh auth login now?"; then
+    elif [ "$auth_choice" = "gh auth login only" ] || [ "$auth_choice" = "Both token + gh auth login" ]; then
       gh auth login
-    else
-      warn "Skipping gh auth login"
     fi
   fi
 }
@@ -428,6 +552,12 @@ configure_codex_backend() {
   update_env "AGENT_TOOL" "Codex"
   update_env "MODEL_SERIES" "GPT"
   install_codex_if_requested
+  if codex_cli_usable; then
+    local usable_cmd
+    usable_cmd="$(linux_codex_cmd)"
+    export CODEX_CMD="$usable_cmd"
+    update_env "CODEX_CMD" "$usable_cmd"
+  fi
 
   printf '\n'
   printf '%sCodex sign-in help%s\n' "$C_BOLD" "$C_RESET"
@@ -472,37 +602,55 @@ configure_codex_backend() {
       prompt_env_value "OPENAI_API_KEY" "Enter OPENAI_API_KEY (input hidden):" true
       ;;
     "Run Codex device auth (recommended for VPS/headless)")
-      if has_cmd codex; then
+      local codex_cmd
+      codex_cmd="$(linux_codex_cmd 2>/dev/null || true)"
+      if [ -n "$codex_cmd" ] && codex_cli_usable; then
+        local codex_status=0
         printf '\n'
         hint "Starting Codex device auth."
         hint "You will get a verification URL and code."
         hint "Open the URL from your local browser, finish login, then come back to this VPS terminal."
-        if codex login --device-auth; then
+        if "$codex_cmd" login --device-auth; then
           ok "Codex device auth completed"
         else
+          codex_status=$?
+          if [ "$codex_status" -eq 130 ]; then
+            warn "Codex device auth was interrupted. Stopping setup."
+            return 130
+          fi
           warn "Codex device auth did not complete."
           hint "If you pressed Ctrl+C or the flow failed, rerun setup and choose this option again."
           hint "You can also use OPENAI_API_KEY instead of interactive login."
         fi
       else
-        warn "Codex CLI is not installed yet, so device auth was skipped"
+        warn "No usable Linux/WSL Codex CLI was found, so device auth was skipped"
+        hint "If command -v codex points into /mnt/c, install Codex inside Linux or rerun setup to let Rover do it."
       fi
       ;;
     "Run browser-based codex login")
-      if has_cmd codex; then
+      local codex_cmd
+      codex_cmd="$(linux_codex_cmd 2>/dev/null || true)"
+      if [ -n "$codex_cmd" ] && codex_cli_usable; then
+        local codex_status=0
         printf '\n'
         hint "Starting browser-based Codex login."
         hint "This works best on a local machine with direct browser access."
         hint "If localhost fails on a VPS, rerun setup and choose device auth instead."
-        if codex login; then
+        if "$codex_cmd" login; then
           ok "Codex browser login completed"
         else
+          codex_status=$?
+          if [ "$codex_status" -eq 130 ]; then
+            warn "Codex browser login was interrupted. Stopping setup."
+            return 130
+          fi
           warn "Codex browser login did not complete."
           hint "On a VPS, choose device auth instead of browser login."
           hint "You can also use OPENAI_API_KEY instead of interactive login."
         fi
       else
-        warn "Codex CLI is not installed yet, so browser login was skipped"
+        warn "No usable Linux/WSL Codex CLI was found, so browser login was skipped"
+        hint "If command -v codex points into /mnt/c, install Codex inside Linux or rerun setup to let Rover do it."
       fi
       ;;
     "Skip Codex auth for now")
@@ -516,15 +664,47 @@ configure_claude_backend() {
   update_env "AGENT_TOOL" "Claude Code"
   update_env "MODEL_SERIES" "Claude"
 
-  warn "Claude CLI install/auth is not fully automated in this script yet."
-  if confirm "Save ANTHROPIC_API_KEY to .env now?"; then
-    prompt_env_value "ANTHROPIC_API_KEY" "Enter ANTHROPIC_API_KEY (input hidden):" true
-  fi
+  # Install claude CLI if missing
   if has_cmd claude; then
-    log "claude CLI already available on PATH"
+    ok "claude CLI already available on PATH"
   else
-    todo "Install Claude CLI manually, then rerun github-contribution-engine --doctor"
+    log "installing Claude CLI via npm"
+    apt_install_if_missing nodejs node
+    apt_install_if_missing npm npm
+    if has_cmd npm; then
+      npm install -g @anthropic-ai/claude-code
+      if has_cmd claude; then
+        ok "claude CLI installed"
+      else
+        warn "claude CLI install may have failed — check npm output above"
+      fi
+    else
+      warn "npm not available; cannot install claude CLI automatically"
+    fi
   fi
+
+  update_env "CLAUDE_CMD" "claude"
+  update_env "CLAUDE_ARGS" "-p -"
+
+  # Auth: browser login (no API key needed) or API key
+  local auth_choice
+  auth_choice="$(choose_option "How do you want to authenticate Claude CLI?" \
+    "Browser login (claude.ai account — no API key needed)" \
+    "Save ANTHROPIC_API_KEY to .env" \
+    "Skip auth for now")"
+  case "$auth_choice" in
+    "Browser login (claude.ai account — no API key needed)")
+      ok "Claude CLI installed. Login step:"
+      todo "Run 'claude' in a new terminal to complete browser login"
+      todo "After login, run 'rover doctor' to verify"
+      ;;
+    "Save ANTHROPIC_API_KEY to .env")
+      prompt_env_value "ANTHROPIC_API_KEY" "Enter ANTHROPIC_API_KEY (input hidden):" true
+      ;;
+    "Skip auth for now")
+      warn "Skipping Claude auth — run 'claude login' or set ANTHROPIC_API_KEY later"
+      ;;
+  esac
 }
 
 configure_api_key_backend() {
@@ -557,30 +737,33 @@ configure_api_key_backend() {
 }
 
 install_openclaw_integration() {
-  if ! confirm "Install OpenClaw skill and wrapper now?"; then
+  if ! confirm "Install Rover OpenClaw skill, wrapper, and mcp.servers.rover now?"; then
     warn "Skipping OpenClaw native integration"
     return 0
   fi
 
   local python_bin
-  local engine_bin
+  local rover_bin
+  local rover_mcp_bin
   python_bin="$(venv_python_bin)"
-  engine_bin="$(venv_engine_bin)"
+  rover_bin="$(venv_bin_dir)/rover"
+  rover_mcp_bin="$(venv_bin_dir)/rover-mcp"
 
   if [ ! -x "$python_bin" ]; then
     warn "Python interpreter not found for OpenClaw asset install: $python_bin"
     return 0
   fi
-  if [ ! -x "$engine_bin" ]; then
-    warn "github-contribution-engine executable not found for OpenClaw asset install: $engine_bin"
+  if [ ! -x "$rover_bin" ] || [ ! -x "$rover_mcp_bin" ]; then
+    warn "rover / rover-mcp executable not found for OpenClaw asset install"
     return 0
   fi
 
-  log "installing OpenClaw skill and wrapper"
-  "$python_bin" "$ROOT_DIR/src/openclaw_install.py" \
-    --engine-bin "$engine_bin" \
-    --python-bin "$python_bin"
-  ok "OpenClaw skill and wrapper installed"
+  log "installing Rover OpenClaw skill, wrapper, and MCP config"
+  "$python_bin" "$ROOT_DIR/src/platform/openclaw_install.py" \
+    --rover-bin "$rover_bin" \
+    --python-bin "$python_bin" \
+    --rover-mcp-bin "$rover_mcp_bin"
+  ok "OpenClaw Rover integration installed"
 }
 
 main() {
@@ -612,8 +795,8 @@ main() {
   log "upgrading pip"
   python -m pip install -U pip
 
-  log "installing github-contribution-engine package"
-  python -m pip install "$ROOT_DIR"
+  log "installing rover package in editable mode"
+  python -m pip install -e "$ROOT_DIR"
 
   section "Project configuration"
   if [ ! -f "$ENV_FILE" ] && [ -f "$EXAMPLE_ENV_FILE" ]; then
@@ -644,22 +827,21 @@ main() {
   install_openclaw_integration
 
   section "Readiness check"
-  log "running doctor"
-  github-contribution-engine --doctor || true
+  log "running rover doctor"
+  rover doctor 2>/dev/null || rover-engine --doctor 2>/dev/null || true
 
   printf '\n'
-  ok "bootstrap complete"
+  ok "setup complete"
   printf '%sNext steps%s\n' "$C_BOLD" "$C_RESET"
   todo "Run: source \"$(venv_activate_script)\""
-  if ! gh auth status >/dev/null 2>&1; then
-    todo "Run: gh auth login"
+  if ! gh auth status >/dev/null 2>&1 && [ -z "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]; then
+    todo "Run: gh auth login or set GH_TOKEN/GITHUB_TOKEN"
   fi
   if ! has_cmd codex && ! has_cmd claude; then
-    todo "Install Codex CLI or Claude CLI before running contribution generation."
+    todo "Install Codex CLI or Claude CLI before running contributions."
   fi
-  todo "Run: github-contribution-engine --doctor"
-  todo "Run: contribution-mcp"
-  todo "In OpenClaw, use the installed skill at ~/.openclaw/workspace/skills/github-contribution-engine/SKILL.md when the workspace exists."
+  todo "Run: rover doctor"
+  todo "Run: rover run       # submit your first PR"
 }
 
 main "$@"

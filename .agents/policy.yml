@@ -1,0 +1,27 @@
+# ROVER Agent Bridge policy.
+# Keep this strict first. Loosen later only after you trust the loop.
+
+max_rounds: 3
+max_changed_files: 12
+max_deleted_files: 0
+max_runtime_minutes: 30
+
+require_tests: true
+stop_on_large_diff: true
+stop_on_env_change: true
+
+protected_paths:
+  - ".git/"
+  - ".env"
+  - ".venv/"
+  - "venv/"
+  - "data/"
+  - "logs/"
+  - "runs/"
+  - "secrets/"
+  - "id_*"
+  - "*.pem"
+  - "*.key"
+
+default_tests:
+  - "python -m pytest"
