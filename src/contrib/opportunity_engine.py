@@ -42,7 +42,7 @@ PATTERN_PRIORITY = {
     "temp_file_cleanup_gap": 6,
     "missing_regression_test_for_obvious_bugfix": 4,
     "flaky_time_dependent_test": 5,
-    "feature_upgrade_todo": 3,
+    "maintainer_todo_feature_upgrade": 3,
 }
 TEST_FILE_RE = re.compile(r"(^|/)(test|tests)(/|$)|(_test\.py$)|(\.test\.ts$)|(\.spec\.ts$)")
 FEATURE_TODO_RE = re.compile(r"(todo|fixme).*(add|support|allow|expose|option|flag|feature)", re.IGNORECASE)
