@@ -381,6 +381,19 @@ class BuilderTargetPreflightTests(unittest.TestCase):
         self.assertEqual(event_details["risk_level"], "medium")
         mocked_notify.assert_called_once_with("PR queued: example/project - fix: app bug")
 
+    def test_main_forwards_raw_argv_to_run_contribution_mode(self) -> None:
+        # Regression: when invoked via contribute.py, sys.argv is ["rover", "run", "3"]
+        # while raw_argv is ["--contrib", "--3"]. main() must forward raw_argv so that
+        # _legacy_count_arg() inside run_contribution_mode finds "--3" (target=3, not 1).
+        with mock.patch("app.builder.run_contribution_mode") as mocked_run, mock.patch(
+            "app.builder.setup_logging"
+        ), mock.patch("app.builder.cleanup_old_logs"):
+            from app import builder as _builder
+            _builder.main(["--contrib", "--3"])
+
+        _, kwargs = mocked_run.call_args
+        self.assertEqual(kwargs.get("raw_argv"), ["--contrib", "--3"])
+
 
 if __name__ == "__main__":
     unittest.main()

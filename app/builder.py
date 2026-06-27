@@ -760,7 +760,11 @@ def _warn_deprecated_aliases(raw_argv: list[str], parser: argparse.ArgumentParse
 
 
 # ── Contribution mode ────────────────────────────────────────
-def run_contribution_mode(args: argparse.Namespace, log: logging.Logger) -> dict[str, object] | None:
+def run_contribution_mode(
+    args: argparse.Namespace,
+    log: logging.Logger,
+    raw_argv: list[str] | None = None,
+) -> dict[str, object] | None:
     from src.core.cli_ui import (
         _choose_arrow,
         _console,
@@ -777,7 +781,7 @@ def run_contribution_mode(args: argparse.Namespace, log: logging.Logger) -> dict
     def _status_label(message: str) -> str:
         return f"  [dim cyan]↻[/]  [dim]{message}[/]"
 
-    target = args.count or _legacy_count_arg(sys.argv) or 1
+    target = args.count or _legacy_count_arg(raw_argv if raw_argv is not None else sys.argv) or 1
     repo_url = args.contrib or ""
     current_login = ""
     try:
@@ -1873,7 +1877,7 @@ def main(argv: list[str] | None = None) -> None:
             check_pr_feedback(log)
         return
     if args.contrib is not None:
-        summary = run_contribution_mode(args, log)
+        summary = run_contribution_mode(args, log, raw_argv=raw_argv)
         if args.json:
             _print_json_payload(
                 {
