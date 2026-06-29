@@ -519,6 +519,26 @@ class ContributionMCPToolsTests(unittest.TestCase):
         self.assertEqual(stage_events[0]["summary"], "scanning repository files")
         self.assertEqual(run.state, "running")
 
+    def test_contrib_check_returns_error_on_timeout(self) -> None:
+        import subprocess
+        from src.contribution_mcp.server import contrib_check
+
+        with patch("src.contribution_mcp.server.subprocess.run", side_effect=subprocess.TimeoutExpired(["python"], 300)):
+            result = contrib_check()
+
+        self.assertFalse(result["ok"])
+        self.assertIn("timed out", result["output"])
+
+    def test_contrib_respond_returns_error_on_timeout(self) -> None:
+        import subprocess
+        from src.contribution_mcp.server import contrib_respond
+
+        with patch("src.contribution_mcp.server.subprocess.run", side_effect=subprocess.TimeoutExpired(["python"], 300)):
+            result = contrib_respond()
+
+        self.assertFalse(result["ok"])
+        self.assertIn("timed out", result["output"])
+
     def test_cancel_run_emits_canceled_event_not_failed(self) -> None:
         # Regression: cancel_run previously appended event type "failed" for a
         # canceled run. Since "failed" is in ROVER_NOTIFY_ON_EVENT_TYPES but

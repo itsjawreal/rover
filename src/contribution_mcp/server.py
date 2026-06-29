@@ -1179,24 +1179,32 @@ def get_run_result(run_id: str) -> dict[str, Any]:
 @mcp.tool()
 def contrib_check() -> dict[str, Any]:
     """Poll all open PRs for status changes and fetch maintainer feedback."""
-    result = subprocess.run(
-        [sys.executable, "-m", "app.builder", "--contrib-check", "--json"],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "app.builder", "--contrib-check", "--json"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "output": "contrib_check timed out after 300s"}
     return {"ok": result.returncode == 0, "output": (result.stdout + result.stderr).strip()[-3000:]}
 
 
 @mcp.tool()
 def contrib_respond() -> dict[str, Any]:
     """Handle maintainer feedback without polling PR status first."""
-    result = subprocess.run(
-        [sys.executable, "-m", "app.builder", "--contrib-respond", "--json"],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "app.builder", "--contrib-respond", "--json"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "output": "contrib_respond timed out after 300s"}
     return {"ok": result.returncode == 0, "output": (result.stdout + result.stderr).strip()[-3000:]}
 
 
