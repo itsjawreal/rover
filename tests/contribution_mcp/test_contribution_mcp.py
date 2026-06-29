@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 
@@ -517,3 +518,47 @@ class ContributionMCPToolsTests(unittest.TestCase):
         self.assertEqual(len(stage_events), 1)
         self.assertEqual(stage_events[0]["summary"], "scanning repository files")
         self.assertEqual(run.state, "running")
+
+    def test_cancel_run_emits_canceled_event_not_failed(self) -> None:
+        # Regression: cancel_run previously appended event type "failed" for a
+        # canceled run. Since "failed" is in ROVER_NOTIFY_ON_EVENT_TYPES but
+        # "canceled" is not, this caused a spurious ROVER FAILED notification to
+        # fire before the correct ROVER CANCELED terminal notification.
+        from src.contribution_mcp.server import ManagedRun, _RUNS, _RUNS_LOCK, cancel_run
+        import subprocess
+
+        run = ManagedRun(
+            run_id="cancel-test-run",
+            mode="search",
+            repo="",
+            goal="bugfix",
+            count=1,
+            dry_run=True,
+            first_pr=False,
+            override_limits=False,
+            command=["python", "-m", "app.builder", "--contrib"],
+            started_at="2026-05-05T11:00:00+00:00",
+            state="running",
+        )
+        mock_proc = unittest.mock.MagicMock(spec=subprocess.Popen)
+        mock_proc.poll.return_value = None
+        mock_proc.returncode = -15
+        run.process = mock_proc
+        run.pid = 12345
+
+        with _RUNS_LOCK:
+            _RUNS[run.run_id] = run
+
+        try:
+            with patch("src.contribution_mcp.server._utc_now", return_value="2026-05-05T11:01:00+00:00"):
+                cancel_run(run.run_id)
+        finally:
+            with _RUNS_LOCK:
+                _RUNS.pop(run.run_id, None)
+
+        self.assertEqual(run.state, "canceled")
+        cancel_events = [e for e in run.events if e["type"] == "canceled"]
+        failed_events = [e for e in run.events if e["type"] == "failed"]
+        self.assertEqual(len(cancel_events), 1)
+        self.assertEqual(len(failed_events), 0)
+        self.assertIn("canceled", cancel_events[0]["summary"].lower())

@@ -1126,7 +1126,7 @@ def cancel_run(run_id: str) -> dict[str, Any]:
     run.returncode = proc.returncode
     run.finished_at = _utc_now()
     run.state = "canceled"
-    _append_event(run, "failed", "Contribution run canceled.", {"returncode": proc.returncode})
+    _append_event(run, "canceled", "Contribution run canceled.", {"returncode": proc.returncode})
     return {"status": "stopped", "run_id": run.run_id, "pid": run.pid}
 
 
