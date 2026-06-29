@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -38,7 +39,7 @@ def install_mcp(project_root: Path) -> Path:
                     "args": [
                         "-d", distro,
                         "--", "bash", "-c",
-                        f"cd {linux_path} && python3 -m src.contribution_mcp.server",
+                        f"cd {shlex.quote(linux_path)} && python3 -m src.contribution_mcp.server",
                     ],
                     "type": "stdio",
                 }

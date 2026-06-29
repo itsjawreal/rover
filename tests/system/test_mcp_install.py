@@ -72,3 +72,17 @@ class MCPInstallTests(unittest.TestCase):
             mock_path.return_value.exists.return_value = False
             result = _is_wsl()
         self.assertFalse(result)
+
+    def test_wsl_bash_command_quotes_path_with_spaces(self) -> None:
+        from src.platform.mcp_install import install_mcp
+        import tempfile, shlex
+        with tempfile.TemporaryDirectory() as tmp:
+            spaced = Path(tmp) / "my project"
+            spaced.mkdir()
+            with patch("src.platform.mcp_install._is_wsl", return_value=True), \
+                 patch.dict(os.environ, {"WSL_DISTRO_NAME": "Ubuntu-20.04"}):
+                out = install_mcp(spaced)
+            config = json.loads(out.read_text(encoding="utf-8"))
+        bash_cmd = config["mcpServers"]["rover"]["args"][-1]
+        linux_path = str(spaced).replace("\\", "/")
+        self.assertIn(shlex.quote(linux_path), bash_cmd)
