@@ -1937,18 +1937,21 @@ def check_pr_statuses(log: logging.Logger) -> None:
             state = "MERGED"
         review_decision = ""
         if state == "OPEN":
-            rr = subprocess.run(
-                ["gh", "api", f"repos/{full_name}/pulls/{pr_number}/reviews"],
-                capture_output=True, text=True, encoding="utf-8", timeout=20,
-                env=gh_safe_env(),
-            )
-            if rr.returncode == 0:
-                try:
-                    reviews = json.loads(rr.stdout)
-                    if any((review.get("state") or "").upper() == "APPROVED" for review in reviews):
-                        review_decision = "APPROVED"
-                except Exception:
-                    pass
+            try:
+                rr = subprocess.run(
+                    ["gh", "api", f"repos/{full_name}/pulls/{pr_number}/reviews"],
+                    capture_output=True, text=True, encoding="utf-8", timeout=20,
+                    env=gh_safe_env(),
+                )
+                if rr.returncode == 0:
+                    try:
+                        reviews = json.loads(rr.stdout)
+                        if any((review.get("state") or "").upper() == "APPROVED" for review in reviews):
+                            review_decision = "APPROVED"
+                    except Exception:
+                        pass
+            except Exception as exc:
+                log.warning("Error fetching reviews for PR %s: %s", pr_url, exc)
 
         if state == "MERGED" and not entry.get("notified_merge"):
             print_ok(f"MERGED  {full_name}  {pr_url}")
@@ -2557,15 +2560,18 @@ def check_pr_feedback(log: logging.Logger) -> None:
             # No code change needed — post acknowledgment without AI call
             ack_text = "Thanks for the review! Glad it looks good."
             from src.github.fork import gh_safe_env
-            r = subprocess.run(
-                ["gh", "pr", "comment", pr_url, "--body", ack_text],
-                capture_output=True, text=True, encoding="utf-8", timeout=20,
-                env=gh_safe_env(),
-            )
-            if r.returncode == 0:
-                log.info("  revision_skipped_approved: %s", pr_url)
-            else:
-                log.warning("  Failed to post ack: %s", (r.stdout + r.stderr).strip()[:200])
+            try:
+                r = subprocess.run(
+                    ["gh", "pr", "comment", pr_url, "--body", ack_text],
+                    capture_output=True, text=True, encoding="utf-8", timeout=20,
+                    env=gh_safe_env(),
+                )
+                if r.returncode == 0:
+                    log.info("  revision_skipped_approved: %s", pr_url)
+                else:
+                    log.warning("  Failed to post ack: %s", (r.stdout + r.stderr).strip()[:200])
+            except Exception as exc:
+                log.warning("  Failed to post ack for PR %s: %s", pr_url, exc)
         else:
             try:
                 action = generate_pr_response(
@@ -2598,12 +2604,16 @@ def check_pr_feedback(log: logging.Logger) -> None:
 
             # Post reply comment
             reply_text = action.reply
-            r = subprocess.run(
-                ["gh", "pr", "comment", pr_url, "--body", reply_text],
-                capture_output=True, text=True, encoding="utf-8", timeout=20,
-                env=gh_safe_env(),
-            )
-            if r.returncode == 0:
+            try:
+                r = subprocess.run(
+                    ["gh", "pr", "comment", pr_url, "--body", reply_text],
+                    capture_output=True, text=True, encoding="utf-8", timeout=20,
+                    env=gh_safe_env(),
+                )
+            except Exception as exc:
+                log.warning("  Failed to post reply for PR %s: %s", pr_url, exc)
+                r = None
+            if r is not None and r.returncode == 0:
                 log.info("  Reply posted: %s", pr_url)
                 notify(
                     f"PR feedback addressed\n"
@@ -2611,7 +2621,7 @@ def check_pr_feedback(log: logging.Logger) -> None:
                     f"Comment by: @{latest['user']}\n"
                     f"URL: {pr_url}"
                 )
-            else:
+            elif r is not None:
                 log.warning("  Failed to post reply: %s", (r.stdout + r.stderr).strip()[:200])
 
         # Advance last_seen past all fetched IDs
@@ -2835,16 +2845,19 @@ def check_all_prs(log: logging.Logger) -> None:
 
             if comment_class == "approved":
                 ack_text = "Thanks for the review! Glad it looks good."
-                rp = subprocess.run(
-                    ["gh", "pr", "comment", pr_url, "--body", ack_text],
-                    capture_output=True, text=True, encoding="utf-8", timeout=20,
-                    env=_gh_env(),
-                )
-                if rp.returncode == 0:
-                    log.info("  revision_skipped_approved: %s", pr_url)
-                    print_ok(f"  ‣  approved — ack posted")
-                else:
-                    log.warning("  Failed to post ack: %s", (rp.stdout + rp.stderr).strip()[:200])
+                try:
+                    rp = subprocess.run(
+                        ["gh", "pr", "comment", pr_url, "--body", ack_text],
+                        capture_output=True, text=True, encoding="utf-8", timeout=20,
+                        env=_gh_env(),
+                    )
+                    if rp.returncode == 0:
+                        log.info("  revision_skipped_approved: %s", pr_url)
+                        print_ok(f"  ‣  approved — ack posted")
+                    else:
+                        log.warning("  Failed to post ack: %s", (rp.stdout + rp.stderr).strip()[:200])
+                except Exception as exc:
+                    log.warning("  Failed to post ack for PR %s: %s", pr_url, exc)
             else:
                 try:
                     action = generate_pr_response(
@@ -2881,12 +2894,16 @@ def check_all_prs(log: logging.Logger) -> None:
                 else:
                     log.info("  revision_skipped_no_changes: %s", pr_url)
 
-                rp = subprocess.run(
-                    ["gh", "pr", "comment", pr_url, "--body", action.reply],
-                    capture_output=True, text=True, encoding="utf-8", timeout=20,
-                    env=_gh_env(),
-                )
-                if rp.returncode == 0:
+                try:
+                    rp = subprocess.run(
+                        ["gh", "pr", "comment", pr_url, "--body", action.reply],
+                        capture_output=True, text=True, encoding="utf-8", timeout=20,
+                        env=_gh_env(),
+                    )
+                except Exception as exc:
+                    log.warning("  Failed to post reply for PR %s: %s", pr_url, exc)
+                    rp = None
+                if rp is not None and rp.returncode == 0:
                     log.info("  Reply posted: %s", pr_url)
                     files_info = (
                         f"Fixed {len(action.changed_files)} file(s): "
@@ -2897,7 +2914,7 @@ def check_all_prs(log: logging.Logger) -> None:
                         f"PR AUTO-REVIEWED\nRepo: {full_name}\n#{pr_number_str}: {pr_title}\n"
                         f"From: @{latest['user']}\n{files_info}\nURL: {pr_url}"
                     )
-                else:
+                elif rp is not None:
                     log.warning("  Failed to post reply: %s", (rp.stdout + rp.stderr).strip()[:200])
 
             all_ids = (
