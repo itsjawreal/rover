@@ -2496,8 +2496,8 @@ def check_pr_feedback(log: logging.Logger) -> None:
     log.info("Checking %d open PR(s) for maintainer feedback...", len(open_entries))
     changed = False
 
-    def _is_human(user: str) -> bool:
-        return not user.endswith("[bot]") and user.lower() != current_login
+    def _is_human(user: str | None) -> bool:
+        return bool(user) and not user.endswith("[bot]") and user.lower() != current_login
 
     for entry in open_entries:
         pr_url    = entry["pr_url"]
@@ -2681,8 +2681,8 @@ def check_all_prs(log: logging.Logger) -> None:
     except ForkError:
         current_login = ""
 
-    def _is_human(user: str) -> bool:
-        return not user.endswith("[bot]") and user.lower() != current_login
+    def _is_human(user: str | None) -> bool:
+        return bool(user) and not user.endswith("[bot]") and user.lower() != current_login
 
     changed = False
 
