@@ -174,7 +174,11 @@ def run_rover(args: list[str]) -> int:
     except FileNotFoundError as exc:
         sys.stdout.write(json.dumps({{"error": str(exc), "action": "wrapper_error"}}, indent=2) + "\\n")
         return 127
-    proc = subprocess.run([rover_bin, *args], capture_output=True, text=True)
+    try:
+        proc = subprocess.run([rover_bin, *args], capture_output=True, text=True, timeout=1800)
+    except subprocess.TimeoutExpired:
+        sys.stdout.write(json.dumps({{"error": "timed out after 1800s", "action": "wrapper_timeout"}}, indent=2) + "\\n")
+        return 1
     if proc.stdout:
         sys.stdout.write(proc.stdout)
     if proc.stderr and proc.returncode != 0:
