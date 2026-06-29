@@ -112,6 +112,19 @@ class AgentStructureTests(unittest.TestCase):
 
         self.assertEqual(result.checkout_path.name, "HKUDS-Vibe-Trading")
 
+    def test_clone_repository_returns_not_cloned_on_timeout(self) -> None:
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            with patch("src.github.repo_cloner.shutil.which", return_value="git"), \
+                 patch("src.github.repo_cloner.subprocess.run", side_effect=subprocess.TimeoutExpired(["git"], 120)):
+                from src.github.repo_cloner import clone_repository
+
+                result = clone_repository("https://github.com/owner/repo.git", self._make_logger(), workspace)
+
+        self.assertFalse(result.cloned)
+        self.assertIn("timed out", result.note.lower())
+
     def test_clone_repository_removes_partial_checkout_before_retry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)

@@ -11,6 +11,7 @@ from unittest.mock import patch
 from src.github.fork import (
     ForkError,
     _clone_repo_with_retry,
+    _run,
     _run_repo_local_verification,
     _verify_dep_update_submission,
     _wait_for_fork_ready,
@@ -108,6 +109,13 @@ class ForkSubmissionTests(unittest.TestCase):
 
         self.assertEqual(mocked_run.call_args_list[0].args[0], ["pnpm", "install", "--frozen-lockfile"])
         self.assertEqual(mocked_run.call_args_list[1].args[0], ["pnpm", "test"])
+
+    def test_run_raises_fork_error_on_timeout(self) -> None:
+        with patch("src.github.fork.subprocess.run", side_effect=subprocess.TimeoutExpired(["gh"], 300)):
+            with self.assertRaises(ForkError) as ctx:
+                _run(["gh", "api", "user"])
+
+        self.assertIn("timed out", str(ctx.exception))
 
     def test_local_verification_blocks_failed_test_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

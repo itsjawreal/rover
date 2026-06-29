@@ -40,19 +40,24 @@ def _run(
     cmd: list[str],
     cwd: str | Path | None = None,
     check: bool = True,
+    timeout: int = 300,
 ) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     if cmd and cmd[0] == "gh":
         env = gh_safe_env()
-    return subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd else None,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=env,
-        check=check,
-    )
+    try:
+        return subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=check,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ForkError(f"command timed out after {timeout}s: {' '.join(str(c) for c in cmd[:3])}") from exc
 
 
 def _verify_dep_update_submission(tmp_dir: Path, changed_files: dict[str, str], log: logging.Logger) -> None:

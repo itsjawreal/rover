@@ -45,7 +45,7 @@ def clone_repository(repo_url: str, log: logging.Logger, workspace: Path | None 
 
     command = ["git", "clone", "--depth", "1", repo_url, str(checkout_path)]
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        subprocess.run(command, check=True, capture_output=True, text=True, timeout=120)
         log.info("Cloned %s into %s", repo_url, checkout_path)
         return CloneResult(repo_url=repo_url, checkout_path=checkout_path, cloned=True, note="Shallow clone completed.")
     except Exception as exc:
