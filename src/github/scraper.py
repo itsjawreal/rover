@@ -160,13 +160,16 @@ def _gh_api_endpoint(url: str, params: dict | None = None) -> str:
 
 def _gh_get_via_cli(url: str, params: dict | None = None, timeout: int = 20) -> Any:
     endpoint = _gh_api_endpoint(url, params)
-    result = subprocess.run(
-        ["gh", "api", endpoint],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "api", endpoint],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ScraperError(f"GitHub CLI API timed out after {timeout}s for {endpoint}") from exc
     if result.returncode != 0:
         stderr = (result.stderr or result.stdout or "").strip()
         raise ScraperError(f"GitHub CLI API error: {stderr[:200]}")
