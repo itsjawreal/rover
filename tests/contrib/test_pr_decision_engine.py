@@ -371,6 +371,48 @@ class PREngineStoreTests(unittest.TestCase):
 
         self.assertTrue(cooldown)
 
+    def test_repo_reads_survive_corrupt_json_columns(self) -> None:
+        # Regression: a corrupt repos-table JSON column crashed every subsequent
+        # repo_live_fit / repo_score_adjustment read (shortlisting + inspect).
+        store, db_path = self._make_store()
+        candidate = _candidate({"client.py": "print('ok')\n"})
+        store.upsert_repo_profile(candidate, 75)
+        with closing(sqlite3.connect(db_path)) as conn:
+            conn.execute(
+                """
+                UPDATE repos SET repo_profile_json = 'not-json',
+                    responsiveness_profile_json = '{corrupt',
+                    pattern_history_json = '[1,2]'
+                WHERE full_name = ?
+                """,
+                (candidate.full_name,),
+            )
+            conn.commit()
+
+        fit = store.repo_live_fit(candidate.full_name)
+        self.assertIn("state", fit)
+        self.assertEqual(store.repo_score_adjustment(candidate.full_name), 0)
+
+    def test_feedback_and_status_writes_survive_corrupt_json_columns(self) -> None:
+        store, db_path = self._make_store()
+        candidate = _candidate({"client.py": "print('ok')\n"})
+        store.upsert_repo_profile(candidate, 75)
+        with closing(sqlite3.connect(db_path)) as conn:
+            conn.execute(
+                "UPDATE repos SET responsiveness_profile_json = '{corrupt', pattern_history_json = 'not-json' WHERE full_name = ?",
+                (candidate.full_name,),
+            )
+            conn.commit()
+
+        store.record_feedback_signal(candidate.full_name, "maintainer_feedback")
+
+        with closing(sqlite3.connect(db_path)) as conn:
+            raw = conn.execute(
+                "SELECT responsiveness_profile_json FROM repos WHERE full_name = ?",
+                (candidate.full_name,),
+            ).fetchone()[0]
+        self.assertEqual(json.loads(raw).get("last_signal"), "maintainer_feedback")
+
 
 class OperatorExperienceTests(unittest.TestCase):
     def _make_store(self) -> tuple[PREngineStore, Path]:

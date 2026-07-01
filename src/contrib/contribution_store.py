@@ -82,6 +82,17 @@ def _bump_counter(mapping: dict, key: str, amount: int = 1) -> None:
     mapping[clean_key] = int(mapping.get(clean_key, 0)) + amount
 
 
+def _safe_json_dict(raw: object) -> dict:
+    """Parse a JSON column that should hold an object; {} on corrupt/empty data."""
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 # ── Persistence ──────────────────────────────────────────────
 class ContributionStore:
     def __init__(self, db_path: Path | None = None) -> None:
@@ -542,9 +553,9 @@ class ContributionStore:
                 "SELECT file_hotspots_json, pattern_history_json, responsiveness_profile_json FROM repos WHERE full_name = ?",
                 (opportunity.repo_full_name,),
             ).fetchone()
-            hotspots = json.loads(row["file_hotspots_json"]) if row else {}
-            pattern_history = json.loads(row["pattern_history_json"]) if row else {}
-            responsiveness = json.loads(row["responsiveness_profile_json"]) if row else {}
+            hotspots = _safe_json_dict(row["file_hotspots_json"]) if row else {}
+            pattern_history = _safe_json_dict(row["pattern_history_json"]) if row else {}
+            responsiveness = _safe_json_dict(row["responsiveness_profile_json"]) if row else {}
             hotspots[opportunity.target_file] = hotspots.get(opportunity.target_file, 0) + 1
             pattern_stats = pattern_history.get(opportunity.pattern_type, _pattern_stats())
             pattern_stats.setdefault("qualified", 0)
@@ -673,7 +684,7 @@ class ContributionStore:
                     score -= 25
             except Exception:
                 pass
-        responsiveness = json.loads(row["responsiveness_profile_json"] or "{}")
+        responsiveness = _safe_json_dict(row["responsiveness_profile_json"])
         if responsiveness.get("last_signal") == "merged":
             score += 8
         if responsiveness.get("last_signal") == "closed":
@@ -717,9 +728,9 @@ class ContributionStore:
         if not row:
             return {"state": "dry-run-only", "score": 50, "reasons": ["no repo memory yet"]}
 
-        profile = json.loads(row["repo_profile_json"] or "{}")
-        responsiveness = json.loads(row["responsiveness_profile_json"] or "{}")
-        history = json.loads(row["pattern_history_json"] or "{}")
+        profile = _safe_json_dict(row["repo_profile_json"])
+        responsiveness = _safe_json_dict(row["responsiveness_profile_json"])
+        history = _safe_json_dict(row["pattern_history_json"])
         score = 50
         reasons: list[str] = []
 
@@ -944,7 +955,7 @@ class ContributionStore:
                         "SELECT pattern_history_json FROM repos WHERE full_name = ?",
                         (repo_full_name,),
                     ).fetchone()
-                    pattern_history = json.loads(repo_row["pattern_history_json"] or "{}") if repo_row else {}
+                    pattern_history = _safe_json_dict(repo_row["pattern_history_json"]) if repo_row else {}
                     opportunity_detail = conn.execute(
                         "SELECT target_file, test_target FROM opportunities WHERE id = ?",
                         (opportunity_id,),
@@ -1004,7 +1015,7 @@ class ContributionStore:
                 "SELECT responsiveness_profile_json FROM repos WHERE full_name = ?",
                 (repo_full_name,),
             ).fetchone()
-            existing_json = json.loads(existing["responsiveness_profile_json"] or "{}") if existing else {}
+            existing_json = _safe_json_dict(existing["responsiveness_profile_json"]) if existing else {}
             existing_json.update(responsiveness)
             conn.execute(
                 """
@@ -1031,7 +1042,7 @@ class ContributionStore:
                     "SELECT pattern_history_json FROM repos WHERE full_name = ?",
                     (repo_full_name,),
                 ).fetchone()
-                pattern_history = json.loads(repo_row["pattern_history_json"] or "{}") if repo_row else {}
+                pattern_history = _safe_json_dict(repo_row["pattern_history_json"]) if repo_row else {}
                 pattern_type = pattern_row["pattern_type"] if pattern_row else "unknown"
                 stats = pattern_history.get(pattern_type, _pattern_stats())
                 if status == "merged":
@@ -1063,7 +1074,7 @@ class ContributionStore:
                 "SELECT responsiveness_profile_json FROM repos WHERE full_name = ?",
                 (repo_full_name,),
             ).fetchone()
-            responsiveness = json.loads(row["responsiveness_profile_json"] or "{}") if row else {}
+            responsiveness = _safe_json_dict(row["responsiveness_profile_json"]) if row else {}
             responsiveness["last_signal"] = signal
             conn.execute(
                 """
@@ -1099,7 +1110,7 @@ class ContributionStore:
                 "SELECT responsiveness_profile_json FROM repos WHERE full_name = ?",
                 (repo_full_name,),
             ).fetchone()
-            responsiveness = json.loads(row["responsiveness_profile_json"] or "{}") if row else {}
+            responsiveness = _safe_json_dict(row["responsiveness_profile_json"]) if row else {}
             scan_signals = responsiveness.setdefault("scan_signals", {})
             scan_signals[kind] = {
                 "severity_counts": dict(severity_counts),
