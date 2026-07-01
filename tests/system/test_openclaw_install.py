@@ -89,6 +89,26 @@ class OpenClawInstallTests(unittest.TestCase):
             self.assertEqual(config["mcp"]["servers"]["other"]["command"], "x")
             self.assertEqual(config["mcp"]["servers"]["rover"]["command"], "/srv/engine/.venv/bin/rover-mcp")
 
+    def test_install_rejects_corrupt_openclaw_json_without_overwriting_it(self) -> None:
+        # Regression: invalid JSON crashed with a raw JSONDecodeError; it must fail
+        # with a clear message and must not clobber the operator's hand-edited file.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / ".openclaw" / "openclaw.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text('{"channels": {broken', encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                install_openclaw_assets(
+                    rover_bin="/srv/engine/.venv/bin/rover",
+                    python_bin="/srv/engine/.venv/bin/python",
+                    rover_mcp_bin="/srv/engine/.venv/bin/rover-mcp",
+                    openclaw_root=str(root / ".openclaw"),
+                )
+
+            self.assertIn("not valid JSON", str(ctx.exception))
+            self.assertEqual(config_path.read_text(encoding="utf-8"), '{"channels": {broken')
+
     def test_install_writes_compatibility_skill_without_legacy_home_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

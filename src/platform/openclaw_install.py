@@ -301,7 +301,18 @@ def _ensure_openclaw_config(
     config_path = root / "openclaw.json"
     if config_path.exists():
         raw = config_path.read_text(encoding="utf-8").strip()
-        config = json.loads(raw) if raw else {}
+        try:
+            config = json.loads(raw) if raw else {}
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"openclaw.json at {config_path} is not valid JSON ({exc}). "
+                "Fix or remove the file, then re-run the install."
+            ) from exc
+        if not isinstance(config, dict):
+            raise ValueError(
+                f"openclaw.json at {config_path} must contain a JSON object, "
+                f"found {type(config).__name__}. Fix or remove the file, then re-run the install."
+            )
     else:
         config = {}
 
