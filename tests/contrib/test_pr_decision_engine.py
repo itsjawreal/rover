@@ -490,13 +490,13 @@ class OperatorExperienceTests(unittest.TestCase):
         self.assertIn("notify-transport", report)
 
     def test_notification_route_check_reports_openclaw_transport(self) -> None:
-        with mock.patch("src.core.doctor.ROVER_NOTIFY_TRANSPORT", "openclaw"), mock.patch(
+        with mock.patch("src.core.doctor.MENISIK_NOTIFY_TRANSPORT", "openclaw"), mock.patch(
             "src.core.doctor.OPENCLAW_NOTIFY_CHANNEL", "telegram"
         ), mock.patch("src.core.doctor.OPENCLAW_NOTIFY_TARGET", "-100123"), mock.patch(
             "src.core.doctor.OPENCLAW_NOTIFY_ACCOUNT", "default"
         ), mock.patch("src.core.doctor.OPENCLAW_NOTIFY_THREAD_ID", "7"), mock.patch(
-            "src.core.doctor.ROVER_NOTIFY_INTERVAL_SECONDS", 45
-        ), mock.patch("src.core.doctor.ROVER_NOTIFY_PROGRESS", True):
+            "src.core.doctor.MENISIK_NOTIFY_INTERVAL_SECONDS", 45
+        ), mock.patch("src.core.doctor.MENISIK_NOTIFY_PROGRESS", True):
             check = _notification_route_check()
 
         self.assertEqual(check.status, "ok")

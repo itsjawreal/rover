@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import getpass
+import logging
 import os
 import shlex
 import shutil
@@ -8,6 +9,35 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+_DEPRECATED_ENV_WARNED: set[str] = set()
+
+
+def _warn_deprecated_env(legacy_name: str, new_name: str) -> None:
+    if legacy_name in _DEPRECATED_ENV_WARNED:
+        return
+    _DEPRECATED_ENV_WARNED.add(legacy_name)
+    log.warning(
+        "%s is deprecated and will be removed in a future release; rename it to %s in your environment/.env.",
+        legacy_name,
+        new_name,
+    )
+
+
+def _env_raw(name: str) -> str:
+    """Read an env var, falling back to its deprecated ROVER_* spelling."""
+    value = os.getenv(name, "").strip()
+    if value:
+        return value
+    if name.startswith("MENISIK_"):
+        legacy_name = "ROVER_" + name[len("MENISIK_"):]
+        legacy_value = os.getenv(legacy_name, "").strip()
+        if legacy_value:
+            _warn_deprecated_env(legacy_name, name)
+            return legacy_value
+    return ""
 
 
 def _looks_like_repo_root(path: Path) -> bool:
@@ -87,14 +117,14 @@ def _detect_storage_mode() -> str:
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name, "").strip().lower()
+    raw = _env_raw(name).lower()
     if not raw:
         return default
     return raw in {"1", "true", "yes", "on"}
 
 
 def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
-    raw = os.getenv(name, "").strip()
+    raw = _env_raw(name)
     try:
         value = int(raw) if raw else default
     except ValueError:
@@ -105,7 +135,7 @@ def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
 
 
 def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
-    raw = os.getenv(name, "").strip()
+    raw = _env_raw(name)
     if not raw:
         return default
     values = tuple(part.strip() for part in raw.split(",") if part.strip())
@@ -375,7 +405,7 @@ OPENCLAW_NOTIFY_THREAD_ID = os.getenv("OPENCLAW_NOTIFY_THREAD_ID", "").strip()
 
 
 def _default_notify_transport() -> str:
-    configured = os.getenv("ROVER_NOTIFY_TRANSPORT", "").strip().lower()
+    configured = _env_raw("MENISIK_NOTIFY_TRANSPORT").lower()
     if configured:
         return configured
     if OPENCLAW_NOTIFY_TARGET:
@@ -385,16 +415,16 @@ def _default_notify_transport() -> str:
     return ""
 
 
-ROVER_NOTIFY_TRANSPORT = _default_notify_transport()
-ROVER_NOTIFY_PROGRESS = _env_bool("ROVER_NOTIFY_PROGRESS", False)
-ROVER_NOTIFY_INTERVAL_SECONDS = _env_int("ROVER_NOTIFY_INTERVAL_SECONDS", 60, minimum=5)
-ROVER_NOTIFY_STALL_SECONDS = _env_int("ROVER_NOTIFY_STALL_SECONDS", 300, minimum=0)
-ROVER_NOTIFY_ONLY_ON_CHANGE = _env_bool("ROVER_NOTIFY_ONLY_ON_CHANGE", True)
-ROVER_NOTIFY_ON_EVENT_TYPES = _env_csv(
-    "ROVER_NOTIFY_ON_EVENT_TYPES",
+MENISIK_NOTIFY_TRANSPORT = _default_notify_transport()
+MENISIK_NOTIFY_PROGRESS = _env_bool("MENISIK_NOTIFY_PROGRESS", False)
+MENISIK_NOTIFY_INTERVAL_SECONDS = _env_int("MENISIK_NOTIFY_INTERVAL_SECONDS", 60, minimum=5)
+MENISIK_NOTIFY_STALL_SECONDS = _env_int("MENISIK_NOTIFY_STALL_SECONDS", 300, minimum=0)
+MENISIK_NOTIFY_ONLY_ON_CHANGE = _env_bool("MENISIK_NOTIFY_ONLY_ON_CHANGE", True)
+MENISIK_NOTIFY_ON_EVENT_TYPES = _env_csv(
+    "MENISIK_NOTIFY_ON_EVENT_TYPES",
     ("started", "repo_selected", "stage", "patch_generated", "pr_submitted", "completed", "failed", "stalled"),
 )
-ROVER_NOTIFY_MAX_MESSAGE_CHARS = _env_int("ROVER_NOTIFY_MAX_MESSAGE_CHARS", 3500, minimum=200)
+MENISIK_NOTIFY_MAX_MESSAGE_CHARS = _env_int("MENISIK_NOTIFY_MAX_MESSAGE_CHARS", 3500, minimum=200)
 PR_MONITOR_INTERVAL_SECONDS = _env_int("PR_MONITOR_INTERVAL_SECONDS", 0, minimum=0)
 TELEGRAM_BOT_ENABLED = _env_bool("TELEGRAM_BOT_ENABLED", False)
 

@@ -26,11 +26,11 @@ from src.core.config import (
     OPENCLAW_NOTIFY_TARGET,
     OPENCLAW_NOTIFY_THREAD_ID,
     ROOT,
-    ROVER_NOTIFY_INTERVAL_SECONDS,
-    ROVER_NOTIFY_ON_EVENT_TYPES,
-    ROVER_NOTIFY_PROGRESS,
-    ROVER_NOTIFY_STALL_SECONDS,
-    ROVER_NOTIFY_TRANSPORT,
+    MENISIK_NOTIFY_INTERVAL_SECONDS,
+    MENISIK_NOTIFY_ON_EVENT_TYPES,
+    MENISIK_NOTIFY_PROGRESS,
+    MENISIK_NOTIFY_STALL_SECONDS,
+    MENISIK_NOTIFY_TRANSPORT,
     ROVER_ARTIFACT_DIR,
     ROVER_ARTIFACT_DIR_WRITABLE,
     ROVER_CACHE_DIR,
@@ -160,7 +160,7 @@ def _hermes_mcp_ready() -> tuple[bool, str]:
 
 
 def _notification_route_check() -> DoctorCheck:
-    transport = ROVER_NOTIFY_TRANSPORT.strip().lower()
+    transport = MENISIK_NOTIFY_TRANSPORT.strip().lower()
     if not transport:
         return DoctorCheck("notify-route", "warn", "notifications disabled; no transport configured")
     if transport == "openclaw":
@@ -168,8 +168,8 @@ def _notification_route_check() -> DoctorCheck:
             return DoctorCheck("notify-route", "warn", "transport=openclaw but OPENCLAW_NOTIFY_TARGET is missing")
         detail = (
             f"transport=openclaw channel={OPENCLAW_NOTIFY_CHANNEL} target={OPENCLAW_NOTIFY_TARGET} "
-            f"interval={ROVER_NOTIFY_INTERVAL_SECONDS}s progress={'on' if ROVER_NOTIFY_PROGRESS else 'off'} "
-            f"stall={ROVER_NOTIFY_STALL_SECONDS}s"
+            f"interval={MENISIK_NOTIFY_INTERVAL_SECONDS}s progress={'on' if MENISIK_NOTIFY_PROGRESS else 'off'} "
+            f"stall={MENISIK_NOTIFY_STALL_SECONDS}s"
         )
         if OPENCLAW_NOTIFY_ACCOUNT:
             detail += f" account={OPENCLAW_NOTIFY_ACCOUNT}"
@@ -182,14 +182,14 @@ def _notification_route_check() -> DoctorCheck:
         return DoctorCheck(
             "notify-route",
             "ok",
-            f"transport=telegram chat={TELEGRAM_CHAT} interval={ROVER_NOTIFY_INTERVAL_SECONDS}s progress={'on' if ROVER_NOTIFY_PROGRESS else 'off'} stall={ROVER_NOTIFY_STALL_SECONDS}s",
+            f"transport=telegram chat={TELEGRAM_CHAT} interval={MENISIK_NOTIFY_INTERVAL_SECONDS}s progress={'on' if MENISIK_NOTIFY_PROGRESS else 'off'} stall={MENISIK_NOTIFY_STALL_SECONDS}s",
         )
     return DoctorCheck("notify-route", "warn", f"unknown notification transport: {transport}")
 
 
 def _notification_transport_check() -> DoctorCheck:
-    transport = ROVER_NOTIFY_TRANSPORT.strip().lower()
-    events = ",".join(ROVER_NOTIFY_ON_EVENT_TYPES)
+    transport = MENISIK_NOTIFY_TRANSPORT.strip().lower()
+    events = ",".join(MENISIK_NOTIFY_ON_EVENT_TYPES)
     if transport != "openclaw":
         return DoctorCheck("notify-transport", "ok", f"transport={transport or 'disabled'} events={events}")
     openclaw_ok = _command_exists(OPENCLAW_CMD)

@@ -23,7 +23,7 @@ if str(_ROOT) not in sys.path:
 
 from src.core.config import (  # noqa: E402
     PR_MONITOR_INTERVAL_SECONDS,
-    ROVER_NOTIFY_TRANSPORT,
+    MENISIK_NOTIFY_TRANSPORT,
     TELEGRAM_BOT_ENABLED,
     TELEGRAM_CHAT,
     TELEGRAM_TOKEN,
@@ -49,7 +49,7 @@ def main() -> None:
     signal.signal(signal.SIGINT, _handle_signal)
 
     ai_backend = os.getenv("AI_BACKEND", "codex")
-    notify_transport = ROVER_NOTIFY_TRANSPORT or "none"
+    notify_transport = MENISIK_NOTIFY_TRANSPORT or "none"
     log.info("Rover daemon starting (AI_BACKEND=%s, notify=%s)", ai_backend, notify_transport)
 
     started: list[str] = []

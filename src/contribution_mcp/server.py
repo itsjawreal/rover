@@ -26,11 +26,11 @@ from src.core.config import (
     LOG_DIR,
     PR_MONITOR_INTERVAL_SECONDS,
     ROOT,
-    ROVER_NOTIFY_INTERVAL_SECONDS,
-    ROVER_NOTIFY_ON_EVENT_TYPES,
-    ROVER_NOTIFY_ONLY_ON_CHANGE,
-    ROVER_NOTIFY_PROGRESS,
-    ROVER_NOTIFY_STALL_SECONDS,
+    MENISIK_NOTIFY_INTERVAL_SECONDS,
+    MENISIK_NOTIFY_ON_EVENT_TYPES,
+    MENISIK_NOTIFY_ONLY_ON_CHANGE,
+    MENISIK_NOTIFY_PROGRESS,
+    MENISIK_NOTIFY_STALL_SECONDS,
     TELEGRAM_BOT_ENABLED,
     TELEGRAM_CHAT,
     TELEGRAM_TOKEN,
@@ -653,14 +653,14 @@ def _maybe_notify_run_events(run: ManagedRun) -> None:
                 continue
             pending.append(dict(event))
     for event in pending:
-        if event["type"] in ROVER_NOTIFY_ON_EVENT_TYPES:
+        if event["type"] in MENISIK_NOTIFY_ON_EVENT_TYPES:
             notify(_render_event_message(run, event), route=run.notification_route)
         with run.lock:
             run.last_notified_seq = max(run.last_notified_seq, int(event["seq"]))
 
 
 def _maybe_notify_progress(run: ManagedRun) -> None:
-    if run.notification_route is None or not ROVER_NOTIFY_PROGRESS:
+    if run.notification_route is None or not MENISIK_NOTIFY_PROGRESS:
         return
     if _supports_telegram_progress_card(run):
         _upsert_progress_card(run)
@@ -668,10 +668,10 @@ def _maybe_notify_progress(run: ManagedRun) -> None:
     if run.state not in {"queued", "started", "running"}:
         return
     now = time.time()
-    if now - run.last_progress_at < ROVER_NOTIFY_INTERVAL_SECONDS:
+    if now - run.last_progress_at < MENISIK_NOTIFY_INTERVAL_SECONDS:
         return
     snapshot_key, _ = _notification_snapshot(run)
-    if ROVER_NOTIFY_ONLY_ON_CHANGE and snapshot_key == run.last_progress_key:
+    if MENISIK_NOTIFY_ONLY_ON_CHANGE and snapshot_key == run.last_progress_key:
         run.last_progress_at = now
         return
     if notify(_render_progress_message(run), route=run.notification_route):
@@ -680,7 +680,7 @@ def _maybe_notify_progress(run: ManagedRun) -> None:
 
 
 def _maybe_notify_stall(run: ManagedRun) -> None:
-    if run.notification_route is None or ROVER_NOTIFY_STALL_SECONDS <= 0:
+    if run.notification_route is None or MENISIK_NOTIFY_STALL_SECONDS <= 0:
         return
     if run.state not in {"queued", "started", "running"}:
         return
@@ -690,11 +690,11 @@ def _maybe_notify_stall(run: ManagedRun) -> None:
     now = time.time()
     with run.lock:
         stalled_for = now - run.last_activity_at
-    if stalled_for < ROVER_NOTIFY_STALL_SECONDS:
+    if stalled_for < MENISIK_NOTIFY_STALL_SECONDS:
         return
     snapshot_key, last_summary = _notification_snapshot(run)
     stall_key = f"stall|{snapshot_key}"
-    if ROVER_NOTIFY_ONLY_ON_CHANGE and stall_key == run.last_progress_key:
+    if MENISIK_NOTIFY_ONLY_ON_CHANGE and stall_key == run.last_progress_key:
         return
     message = "\n".join(
         [

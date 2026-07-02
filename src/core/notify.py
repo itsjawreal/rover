@@ -13,8 +13,8 @@ from src.core.config import (
     OPENCLAW_NOTIFY_CHANNEL,
     OPENCLAW_NOTIFY_TARGET,
     OPENCLAW_NOTIFY_THREAD_ID,
-    ROVER_NOTIFY_MAX_MESSAGE_CHARS,
-    ROVER_NOTIFY_TRANSPORT,
+    MENISIK_NOTIFY_MAX_MESSAGE_CHARS,
+    MENISIK_NOTIFY_TRANSPORT,
     TELEGRAM_CHAT,
     TELEGRAM_TOKEN,
 )
@@ -32,14 +32,14 @@ class NotificationRoute:
 
 
 def _truncate_message(message: str) -> str:
-    if len(message) <= ROVER_NOTIFY_MAX_MESSAGE_CHARS:
+    if len(message) <= MENISIK_NOTIFY_MAX_MESSAGE_CHARS:
         return message
-    limit = max(50, ROVER_NOTIFY_MAX_MESSAGE_CHARS - 3)
+    limit = max(50, MENISIK_NOTIFY_MAX_MESSAGE_CHARS - 3)
     return message[:limit].rstrip() + "..."
 
 
 def default_notification_route() -> NotificationRoute | None:
-    if ROVER_NOTIFY_TRANSPORT == "openclaw" and OPENCLAW_NOTIFY_TARGET:
+    if MENISIK_NOTIFY_TRANSPORT == "openclaw" and OPENCLAW_NOTIFY_TARGET:
         return NotificationRoute(
             transport="openclaw",
             channel=OPENCLAW_NOTIFY_CHANNEL,
@@ -47,7 +47,7 @@ def default_notification_route() -> NotificationRoute | None:
             account=OPENCLAW_NOTIFY_ACCOUNT,
             thread_id=OPENCLAW_NOTIFY_THREAD_ID,
         )
-    if ROVER_NOTIFY_TRANSPORT == "telegram" and TELEGRAM_TOKEN and TELEGRAM_CHAT:
+    if MENISIK_NOTIFY_TRANSPORT == "telegram" and TELEGRAM_TOKEN and TELEGRAM_CHAT:
         return NotificationRoute(transport="telegram", target=TELEGRAM_CHAT)
     return None
 

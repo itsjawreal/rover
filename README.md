@@ -187,15 +187,17 @@ PR rejected: owner/repo - feat: add broad dashboard mode (Reason: Too broad for 
 Background MCP runs can also push progress updates while work is still in flight. Configure either direct Telegram delivery or OpenClaw relay delivery:
 
 ```text
-ROVER_NOTIFY_TRANSPORT=openclaw
+MENISIK_NOTIFY_TRANSPORT=openclaw
 OPENCLAW_NOTIFY_CHANNEL=telegram
 OPENCLAW_NOTIFY_TARGET=-1001234567890
-ROVER_NOTIFY_PROGRESS=false
-ROVER_NOTIFY_INTERVAL_SECONDS=60
-ROVER_NOTIFY_STALL_SECONDS=300
-ROVER_NOTIFY_ONLY_ON_CHANGE=true
-ROVER_NOTIFY_ON_EVENT_TYPES=started,repo_selected,stage,patch_generated,pr_submitted,completed,failed,stalled
+MENISIK_NOTIFY_PROGRESS=false
+MENISIK_NOTIFY_INTERVAL_SECONDS=60
+MENISIK_NOTIFY_STALL_SECONDS=300
+MENISIK_NOTIFY_ONLY_ON_CHANGE=true
+MENISIK_NOTIFY_ON_EVENT_TYPES=started,repo_selected,stage,patch_generated,pr_submitted,completed,failed,stalled
 ```
+
+The deprecated `ROVER_NOTIFY_*` spellings are still read as a fallback and log a one-time deprecation warning per run.
 
 Pattern classes (by priority):
 
@@ -301,19 +303,20 @@ CODEX_CMD=codex
 CODEX_ARGS=exec --skip-git-repo-check -s read-only -
 
 # Notifications (optional)
+# (deprecated ROVER_NOTIFY_* spellings still work as fallback, with a warning)
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
-ROVER_NOTIFY_TRANSPORT=openclaw
+MENISIK_NOTIFY_TRANSPORT=openclaw
 OPENCLAW_CMD=openclaw
 OPENCLAW_NOTIFY_CHANNEL=telegram
 OPENCLAW_NOTIFY_TARGET=
 OPENCLAW_NOTIFY_ACCOUNT=
 OPENCLAW_NOTIFY_THREAD_ID=
-ROVER_NOTIFY_PROGRESS=false
-ROVER_NOTIFY_INTERVAL_SECONDS=60
-ROVER_NOTIFY_STALL_SECONDS=300
-ROVER_NOTIFY_ONLY_ON_CHANGE=true
-ROVER_NOTIFY_ON_EVENT_TYPES=started,repo_selected,stage,patch_generated,pr_submitted,completed,failed,stalled
+MENISIK_NOTIFY_PROGRESS=false
+MENISIK_NOTIFY_INTERVAL_SECONDS=60
+MENISIK_NOTIFY_STALL_SECONDS=300
+MENISIK_NOTIFY_ONLY_ON_CHANGE=true
+MENISIK_NOTIFY_ON_EVENT_TYPES=started,repo_selected,stage,patch_generated,pr_submitted,completed,failed,stalled
 
 # Contribution targeting
 CONTRIB_AUTORUN_ARGS=--contrib --1

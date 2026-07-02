@@ -368,10 +368,10 @@ class ContributionMCPToolsTests(unittest.TestCase):
             patch("src.contribution_mcp.server._update_run_summary"),
             patch("src.contribution_mcp.server.time.sleep"),
             patch("src.contribution_mcp.server.time.time", return_value=200.0),
-            patch("src.contribution_mcp.server.ROVER_NOTIFY_PROGRESS", True),
-            patch("src.contribution_mcp.server.ROVER_NOTIFY_ONLY_ON_CHANGE", True),
-            patch("src.contribution_mcp.server.ROVER_NOTIFY_STALL_SECONDS", 60),
-            patch("src.contribution_mcp.server.ROVER_NOTIFY_ON_EVENT_TYPES", ("started", "repo_selected", "completed", "stalled")),
+            patch("src.contribution_mcp.server.MENISIK_NOTIFY_PROGRESS", True),
+            patch("src.contribution_mcp.server.MENISIK_NOTIFY_ONLY_ON_CHANGE", True),
+            patch("src.contribution_mcp.server.MENISIK_NOTIFY_STALL_SECONDS", 60),
+            patch("src.contribution_mcp.server.MENISIK_NOTIFY_ON_EVENT_TYPES", ("started", "repo_selected", "completed", "stalled")),
         ):
             _run_notification_loop(run)
 
@@ -541,7 +541,7 @@ class ContributionMCPToolsTests(unittest.TestCase):
 
     def test_cancel_run_emits_canceled_event_not_failed(self) -> None:
         # Regression: cancel_run previously appended event type "failed" for a
-        # canceled run. Since "failed" is in ROVER_NOTIFY_ON_EVENT_TYPES but
+        # canceled run. Since "failed" is in MENISIK_NOTIFY_ON_EVENT_TYPES but
         # "canceled" is not, this caused a spurious ROVER FAILED notification to
         # fire before the correct ROVER CANCELED terminal notification.
         from src.contribution_mcp.server import ManagedRun, _RUNS, _RUNS_LOCK, cancel_run
