@@ -30,4 +30,4 @@ Support level today:
 - Codex: tested default path
 - Claude Code: supported fallback path
 - OpenClaw: supported MCP plus native wrapper path
-- Hermes and other MCP-capable agent shells: supported through the Rover MCP server
+- Hermes and other MCP-capable agent shells: supported through the Menisik MCP server

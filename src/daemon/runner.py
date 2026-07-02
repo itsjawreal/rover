@@ -1,11 +1,11 @@
-"""Rover background daemon — PR monitor + Telegram bot, no MCP client needed.
+"""Menisik background daemon — PR monitor + Telegram bot, no MCP client needed.
 
 Works with any AI backend (codex, claude) configured in .env.
 Notifications go through the configured transport (openclaw → Telegram, or
 direct Telegram).
 
 Usage:
-    rover-daemon          # installed entry point
+    menisik-daemon        # installed entry point
     python -m src.daemon  # direct
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-log = logging.getLogger("rover.daemon")
+log = logging.getLogger("menisik.daemon")
 
 _stop_event = threading.Event()
 
@@ -50,7 +50,7 @@ def main() -> None:
 
     ai_backend = os.getenv("AI_BACKEND", "codex")
     notify_transport = MENISIK_NOTIFY_TRANSPORT or "none"
-    log.info("Rover daemon starting (AI_BACKEND=%s, notify=%s)", ai_backend, notify_transport)
+    log.info("Menisik daemon starting (AI_BACKEND=%s, notify=%s)", ai_backend, notify_transport)
 
     started: list[str] = []
 
@@ -82,6 +82,6 @@ def main() -> None:
         )
         sys.exit(1)
 
-    log.info("Rover daemon running: %s", " | ".join(started))
+    log.info("Menisik daemon running: %s", " | ".join(started))
     _stop_event.wait()
-    log.info("Rover daemon stopped")
+    log.info("Menisik daemon stopped")

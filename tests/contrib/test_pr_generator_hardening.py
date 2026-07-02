@@ -371,7 +371,7 @@ class PRGeneratorHardeningTests(unittest.TestCase):
                     enforce_scope=True,
                 )
 
-        self.assertIn("Use 'rover inspect example/inactive-repo' instead.", str(ctx.exception))
+        self.assertIn("Use 'menisik inspect example/inactive-repo' instead.", str(ctx.exception))
 
     def test_fetch_repo_candidate_override_limits_allows_inactive_targeted_repo(self) -> None:
         payload = {

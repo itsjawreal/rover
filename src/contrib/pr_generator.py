@@ -700,7 +700,7 @@ def get_repo_inspect_data(candidate: RepoCandidate) -> dict[str, object]:
         )
     elif targeted_scope == "inspect-only":
         next_steps.append(
-            f"Keep this repo in inspect-only mode. Use `rover inspect {candidate.full_name}` to review fit, but do not run a pinned contribution attempt."
+            f"Keep this repo in inspect-only mode. Use `menisik inspect {candidate.full_name}` to review fit, but do not run a pinned contribution attempt."
         )
     elif _PR_TARGETED_ALLOW_BROAD:
         next_steps.append(
@@ -1989,7 +1989,7 @@ def check_pr_statuses(log: logging.Logger) -> None:
 
         elif state == "CLOSED" and not entry.get("notified_merge"):
             print_warn(f"CLOSED  {full_name}  {pr_title}")
-            print_item(f"→ rover report  # see rejection patterns")
+            print_item(f"→ menisik report  # see rejection patterns")
             log.info("CLOSED (not merged): %s — %s", full_name, pr_url)
             notify(
                 f"PR closed (not merged)\n"
@@ -2079,7 +2079,7 @@ def fetch_repo_candidate_with_scope(
     if enforce_scope and not override_limits and pushed_days_ago > _PR_MAX_PUSHED:
         raise ScraperError(
             f"{full_name} looks inactive (last push {pushed_days_ago}d ago; limit {_PR_MAX_PUSHED}d). "
-            f"Use 'rover inspect {full_name}' instead."
+            f"Use 'menisik inspect {full_name}' instead."
         )
 
     lic = _get_license(data)
@@ -2817,7 +2817,7 @@ def check_all_prs(log: logging.Logger) -> None:
 
         if state == "CLOSED" and not entry.get("notified_merge"):
             print_warn(f"CLOSED  {full_name}  {pr_title}")
-            print_item("→ rover report  # see rejection patterns")
+            print_item("→ menisik report  # see rejection patterns")
             notify(f"PR closed (not merged)\nRepo: {full_name}\nTitle: {pr_title}\nURL: {pr_url}")
             entry["status"]         = "closed"
             entry["notified_merge"] = True
@@ -3316,7 +3316,7 @@ _DEP_SKIP_EXACT = {"python", "pip", "setuptools", "wheel", "pkg_resources"}
 
 def _fetch_json_url(url: str, timeout: int = 8) -> dict | None:
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "rover/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "menisik/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception:

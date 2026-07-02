@@ -194,12 +194,12 @@ class ContributionEngine:
         lines.append("")
         lines.append("Suggested next step:")
         if queued:
-            next_steps = ["Run `rover run 1` to consume the strongest queued opportunity."]
+            next_steps = ["Run `menisik run 1` to consume the strongest queued opportunity."]
         elif latest.get("top_rejections"):
             top_reason = latest["top_rejections"][0][0]
             next_steps = [f"Investigate rejection pattern `{top_reason}` before widening search or targeting larger repos."]
         else:
-            next_steps = ["Run `rover run 1` to start a new contribution cycle."]
+            next_steps = ["Run `menisik run 1` to start a new contribution cycle."]
         lines.append(bullet_block("Suggested next step", next_steps))
         return "\n".join(lines)
 

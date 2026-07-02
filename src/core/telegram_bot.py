@@ -1,4 +1,4 @@
-"""Telegram command bot — receives messages and routes them to Rover CLI actions.
+"""Telegram command bot — receives messages and routes them to Menisik CLI actions.
 
 Supported commands (send in the configured chat):
   /check                   poll open PRs + auto-respond to maintainer feedback
@@ -12,7 +12,8 @@ Supported commands (send in the configured chat):
   /monitor                 show PR monitor status
   /help                    show this reference
 
-Any "rover <subcommand>" text is also accepted as an alias.
+Any "menisik <subcommand>" text is also accepted as an alias
+(the deprecated "rover <subcommand>" spelling still works).
 Only messages from the configured TELEGRAM_CHAT_ID are processed.
 """
 from __future__ import annotations
@@ -31,8 +32,8 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 _HELP_TEXT = """\
-Rover Bot — Commands
-====================
+Menisik Bot — Commands
+======================
 /check                  poll PRs + auto-fix maintainer feedback
 /respond                handle maintainer comments only
 /prs [open|merged|closed]  list submitted PRs
@@ -44,17 +45,17 @@ Rover Bot — Commands
 /monitor                PR monitor status
 /help                   show this reference
 
-Aliases: send "rover check", "rover run owner/repo", etc.
+Aliases: send "menisik check", "menisik run owner/repo", etc.
 """
 
 
 class TelegramCommandBot:
-    """Long-poll Telegram bot that routes incoming messages to Rover CLI."""
+    """Long-poll Telegram bot that routes incoming messages to Menisik CLI."""
 
-    def __init__(self, token: str, chat_id: str, rover_root: Path) -> None:
+    def __init__(self, token: str, chat_id: str, project_root: Path) -> None:
         self._token = token
         self._chat_id = str(chat_id).strip()
-        self._rover_root = rover_root
+        self._project_root = project_root
         self._running = False
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -104,14 +105,14 @@ class TelegramCommandBot:
         # accept both group ID (negative) and its stripped form
         return chat_id == self._chat_id or chat_id == self._chat_id.lstrip("-")
 
-    # ── Rover runner ─────────────────────────────────────────
+    # ── Menisik runner ───────────────────────────────────────
 
-    def _rover(self, *args: str) -> str:
+    def _menisik(self, *args: str) -> str:
         cmd = [sys.executable, "-m", "app.contribute", *args]
         try:
             result = subprocess.run(
                 cmd,
-                cwd=str(self._rover_root),
+                cwd=str(self._project_root),
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -127,9 +128,13 @@ class TelegramCommandBot:
 
     def _dispatch(self, text: str) -> str:
         text = text.strip()
-        # Strip "rover " prefix so "rover check" == "/check"
+        # Strip "menisik " prefix so "menisik check" == "/check";
+        # "rover " is the deprecated pre-rename alias.
         lower = text.lower()
-        if lower.startswith("rover "):
+        if lower.startswith("menisik "):
+            text = text[8:].strip()
+            lower = text.lower()
+        elif lower.startswith("rover "):
             text = text[6:].strip()
             lower = text.lower()
 
@@ -142,38 +147,38 @@ class TelegramCommandBot:
 
         if cmd == "check":
             self.send("Polling PRs and handling feedback…")
-            return self._rover("check", "--json")
+            return self._menisik("check", "--json")
 
         if cmd == "respond":
             self.send("Handling maintainer feedback…")
-            return self._rover("respond", "--json")
+            return self._menisik("respond", "--json")
 
         if cmd == "prs":
             status = rest[0] if rest else "all"
-            return self._rover("list-prs", status)
+            return self._menisik("list-prs", status)
 
         if cmd == "run":
             repo = rest[0] if rest else ""
             if repo:
                 self.send(f"Starting contribution run for {repo}…")
-                return self._rover("run", repo)
+                return self._menisik("run", repo)
             self.send("Starting search-mode contribution run…")
-            return self._rover("run")
+            return self._menisik("run")
 
         if cmd == "inspect":
             if not rest:
                 return "Usage: /inspect owner/repo"
             self.send(f"Inspecting {rest[0]}…")
-            return self._rover("inspect", rest[0])
+            return self._menisik("inspect", rest[0])
 
         if cmd == "report":
-            return self._rover("report")
+            return self._menisik("report")
 
         if cmd == "status":
-            return self._rover()  # no args → status dashboard
+            return self._menisik()  # no args → status dashboard
 
         if cmd == "doctor":
-            return self._rover("doctor")
+            return self._menisik("doctor")
 
         if cmd == "monitor":
             sub = rest[0].lower() if rest else ""
@@ -181,12 +186,12 @@ class TelegramCommandBot:
                 # start monitor via env-driven MCP config — advise user
                 return (
                     "To start the PR monitor, set PR_MONITOR_INTERVAL_SECONDS=300 in .env\n"
-                    "and restart rover-mcp, or call start_pr_monitor via MCP."
+                    "and restart menisik-mcp, or call start_pr_monitor via MCP."
                 )
             if sub == "off":
                 return (
                     "To stop the PR monitor, set PR_MONITOR_INTERVAL_SECONDS=0 in .env\n"
-                    "and restart rover-mcp, or call stop_pr_monitor via MCP."
+                    "and restart menisik-mcp, or call stop_pr_monitor via MCP."
                 )
             # status — call the MCP server function directly via subprocess
             result = subprocess.run(
@@ -194,7 +199,7 @@ class TelegramCommandBot:
                  "import sys; sys.path.insert(0,'.'); "
                  "from src.contribution_mcp.server import get_pr_monitor_status; "
                  "import json; print(json.dumps(get_pr_monitor_status()))"],
-                cwd=str(self._rover_root),
+                cwd=str(self._project_root),
                 capture_output=True, text=True, timeout=10,
             )
             if result.returncode == 0 and result.stdout.strip():
@@ -211,16 +216,16 @@ class TelegramCommandBot:
                     pass
             return "Monitor status unavailable (MCP server not running in this process)."
 
-        # pass-through: forward unknown input as rover subcommand tokens
+        # pass-through: forward unknown input as menisik subcommand tokens
         if parts:
-            return self._rover(*parts)
+            return self._menisik(*parts)
         return _HELP_TEXT
 
     # ── Main polling loop ────────────────────────────────────
 
     def _loop(self) -> None:
         log.info("Telegram bot started (chat_id=%s)", self._chat_id)
-        self.send("Rover bot online. Send /help for available commands.")
+        self.send("Menisik bot online. Send /help for available commands.")
         while True:
             with self._lock:
                 if not self._running:

@@ -105,8 +105,8 @@ def build_profile_report(
     auth_error: str,
 ) -> str:
     lines = [
-        "Rover Profile",
-        "=============",
+        "Menisik Profile",
+        "===============",
         "",
         f"GitHub login: {github_login or '-'}",
         f"Authenticated: {'yes' if github_authenticated else 'no'}",
@@ -124,7 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m app.builder",
         description=dedent(
             """\
-            Rover — automated open-source PR bot.
+            Menisik — automated open-source PR bot.
 
             Searches GitHub for active repos, scans for real bugs and missing fixes,
             generates minimal patches using AI, and submits pull requests.
@@ -135,34 +135,34 @@ def build_parser() -> argparse.ArgumentParser:
             """\
             ── QUICK START ──────────────────────────────────────────────────
               1. Copy .env.example to .env and choose GitHub auth + AI backend
-              2. rover doctor                             # verify setup
-              3. rover run 1                             # submit 1 PR (auto-search)
-              4. rover check                             # check PR status next day
+              2. menisik doctor                           # verify setup
+              3. menisik run 1                           # submit 1 PR (auto-search)
+              4. menisik check                           # check PR status next day
 
             ── COMMON WORKFLOWS ─────────────────────────────────────────────
               # Search mode — engine picks the best target automatically
-              rover run 1
-              rover run 3                                 # submit 3 PRs
-              rover run --first-pr                        # prefer beginner-friendly repos
+              menisik run 1
+              menisik run 3                               # submit 3 PRs
+              menisik run --first-pr                      # prefer beginner-friendly repos
 
               # Targeted mode — pin a specific repo
-              rover owner/repo
-              rover run 1 owner/repo --goal feature_upgrade
+              menisik owner/repo
+              menisik run 1 owner/repo --goal feature_upgrade
 
               # Dry run — generate patch, skip submission
-              rover run --dry-run
-              rover run owner/repo --override-limits       # bypass .env contribution limits
+              menisik run --dry-run
+              menisik run owner/repo --override-limits      # bypass .env contribution limits
 
               # Inspect a repo without submitting
-              rover inspect owner/repo
+              menisik inspect owner/repo
 
               # PR lifecycle
-              rover check                # poll open PRs + handle feedback
+              menisik check              # poll open PRs + handle feedback
               python -m app.builder --contrib-respond   # low-level maintainer response path
-              rover report               # show run history + queued opportunities
+              menisik report              # show run history + queued opportunities
 
               # Diagnostics
-              rover doctor
+              menisik doctor
 
             ── KEY ENV VARS (.env) ──────────────────────────────────────────
               GH_TOKEN / GITHUB_TOKEN  Optional PAT for token-based GitHub auth
@@ -176,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
               PR_MAX_PUSHED_DAYS    Skip repos inactive longer than N days (default: 45)
 
             ── DEPRECATION POLICY ───────────────────────────────────────────
-              rover-engine, --pr, --pr-check, and --pr-respond are deprecated.
+              rover, rover-engine, --pr, --pr-check, and --pr-respond are deprecated.
               Warning period: 0.1.x
               Planned removal: 0.2.0 or next intentionally breaking CLI release.
             """
@@ -187,7 +187,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--version", "-V",
         action="version",
         version=(
-            "rover 0.1.0\n"
+            "menisik 0.1.2\n"
             f"root={Path(__file__).resolve().parents[1]}\n"
             f"python={sys.executable}"
         ),
@@ -350,7 +350,7 @@ def build_parser() -> argparse.ArgumentParser:
     advanced.add_argument(
         "--route-only",
         action="store_true",
-        help="Map --command-text to a canonical Rover action and exit without executing it.",
+        help="Map --command-text to a canonical Menisik action and exit without executing it.",
     )
     advanced.add_argument(
         "--json",
@@ -501,7 +501,7 @@ _DEPRECATED_FLAG_HINTS: dict[str, str] = {
 
 
 def _format_modern_contrib_command(args: argparse.Namespace) -> str:
-    parts: list[str] = ["rover", "run"]
+    parts: list[str] = ["menisik", "run"]
     if args.count:
         parts.append(str(args.count))
     if args.contrib:
@@ -519,18 +519,18 @@ def _format_modern_contrib_command(args: argparse.Namespace) -> str:
 
 def _suggest_modern_command(args: argparse.Namespace) -> str:
     if args.doctor:
-        return "rover doctor"
+        return "menisik doctor"
     if args.contrib_check:
-        return "rover check"
+        return "menisik check"
     if args.contrib_report:
-        return "rover report"
+        return "menisik report"
     if args.repo_inspect:
-        return f"rover inspect {args.repo_inspect}"
+        return f"menisik inspect {args.repo_inspect}"
     if args.contrib_respond:
         return "python -m app.builder --contrib-respond"
     if args.contrib is not None:
         return _format_modern_contrib_command(args)
-    return "rover doctor"
+    return "menisik doctor"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -544,7 +544,11 @@ def _human_approval_required(args: argparse.Namespace) -> bool:
     configured = getattr(args, "human_approval", None)
     if configured is not None:
         return bool(configured)
-    return _env_bool("ROVER_HUMAN_APPROVAL") or _env_bool("CONTRIB_HUMAN_APPROVAL")
+    return (
+        _env_bool("MENISIK_HUMAN_APPROVAL")
+        or _env_bool("ROVER_HUMAN_APPROVAL")  # deprecated pre-rename spelling
+        or _env_bool("CONTRIB_HUMAN_APPROVAL")
+    )
 
 
 def _is_terminal_generation_failure(exc: PRGeneratorError) -> bool:
@@ -770,7 +774,7 @@ def _warn_deprecated_aliases(raw_argv: list[str], parser: argparse.ArgumentParse
 
     argv0 = Path(sys.argv[0]).name.lower() if sys.argv else ""
     if argv0 == "rover-engine":
-        replacement = _suggest_modern_command(parsed_args) if parsed_args is not None else "rover doctor"
+        replacement = _suggest_modern_command(parsed_args) if parsed_args is not None else "menisik doctor"
         messages.append(
             f"`rover-engine` is a compatibility alias. Prefer modern commands. Try: `{replacement}`."
         )
@@ -783,7 +787,7 @@ def _warn_deprecated_aliases(raw_argv: list[str], parser: argparse.ArgumentParse
         extra = ""
         if parsed_args is not None:
             if arg == "--pr-check":
-                extra = " Equivalent command: `rover check`."
+                extra = " Equivalent command: `menisik check`."
             elif arg == "--pr-respond":
                 extra = " Equivalent command: `python -m app.builder --contrib-respond`."
             elif arg == "--pr":
@@ -1285,8 +1289,8 @@ def run_contribution_mode(
                 print_item(f"broad rejected early: [bold]{summary.get('broad_rejected_early', 0)}[/]")
             print_blank()
         print_section("Next steps")
-        print_item("[bold]rover report[/]               [dim]— full rejection history[/]")
-        print_item("[bold]rover inspect[/] owner/repo   [dim]— diagnose a specific repo[/]")
+        print_item("[bold]menisik report[/]             [dim]— full rejection history[/]")
+        print_item("[bold]menisik inspect[/] owner/repo [dim]— diagnose a specific repo[/]")
         print_item("adjust [bold]CONTRIB_LANE[/] or [bold]CONTRIB_TOPIC_KEYWORDS[/] in [dim].env[/]")
         print_blank()
 
@@ -1788,7 +1792,7 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.test_notify:
         from src.core.notify import notify
-        success = notify("🧪 Rover test notification - credentials working!")
+        success = notify("🧪 Menisik test notification - credentials working!")
         if success:
             print_ok("Test notification sent successfully")
         else:
@@ -1840,7 +1844,7 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.test_notify:
         from src.core.notify import notify
-        success = notify("🧪 Rover test notification - credentials working!")
+        success = notify("🧪 Menisik test notification - credentials working!")
         if success:
             print_ok("Test notification sent successfully")
         else:

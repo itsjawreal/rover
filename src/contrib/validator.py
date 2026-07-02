@@ -49,7 +49,7 @@ def run_sandbox_validation(changed_files: dict[str, str], test_target: str = "")
     Returns a ValidationResult with sandbox_verified=True only if all checks
     pass. sandbox_output contains actionable error text for retry use.
     """
-    with tempfile.TemporaryDirectory(prefix="rover_sandbox_") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix="menisik_sandbox_") as tmpdir:
         tmp = Path(tmpdir)
 
         # Write changed files into temp dir.

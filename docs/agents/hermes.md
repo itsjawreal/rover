@@ -2,11 +2,11 @@
 
 ## Role
 
-Hermes is treated as an MCP-capable agent shell, not a separate Rover backend.
+Hermes is treated as an MCP-capable agent shell, not a separate Menisik backend.
 
 ## Use When
 
-- connecting Rover to a Hermes chat or orchestration surface
+- connecting Menisik to a Hermes chat or orchestration surface
 - evaluating another agent shell that can call MCP tools over stdio
 - documenting cross-agent operator guidance outside Codex and Claude Code
 
@@ -31,7 +31,7 @@ For chat-style Hermes requests:
    - `contrib_respond`
    - `contrib_report`
 
-This keeps natural-language routing centralized in Rover instead of duplicating intent logic in Hermes.
+This keeps natural-language routing centralized in Menisik instead of duplicating intent logic in Hermes.
 
 ## MCP Config
 
@@ -39,14 +39,14 @@ Canonical Hermes integration target:
 
 - `~/.hermes/config.yaml`
 - root key: `mcp_servers`
-- server name: `rover`
+- server name: `menisik` (installs before the 0.2.0 rename used `rover`; re-run `--install-hermes` to migrate)
 
 Example:
 
 ```yaml
 mcp_servers:
-  rover:
-    command: "/absolute/path/to/rover-mcp"
+  menisik:
+    command: "/absolute/path/to/menisik-mcp"
     args: []
     enabled: true
 ```

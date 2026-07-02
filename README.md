@@ -254,10 +254,10 @@ curl -fsSL https://raw.githubusercontent.com/itsjawreal/menisik/master/scripts/b
 
 The guided setup can also install a native OpenClaw skill + wrapper in one flow:
 
-- `~/.openclaw/workspace/skills/rover/SKILL.md` when the OpenClaw workspace exists
-- fallback: `~/.openclaw/skills/rover/SKILL.md`
-- `~/.openclaw/tools/rover.py`
-- `~/.openclaw/openclaw.json` with `mcp.servers.rover`
+- `~/.openclaw/workspace/skills/menisik/SKILL.md` when the OpenClaw workspace exists
+- fallback: `~/.openclaw/skills/menisik/SKILL.md`
+- `~/.openclaw/tools/menisik.py`
+- `~/.openclaw/openclaw.json` with `mcp.servers.menisik` (stale `mcp.servers.rover` entries are cleaned up on install)
 
 What the bootstrap script does:
 
@@ -276,7 +276,7 @@ What the bootstrap script does:
 - only asks the follow-up questions relevant to the selected backend
 - can prompt for `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY` depending on the selected setup path
 - can run `codex --login` when the user chooses the interactive Codex path
-- runs `rover --doctor`
+- runs `menisik --doctor`
 - prints the remaining manual steps such as `gh auth login` and AI CLI setup
 
 Install dependencies:

@@ -113,7 +113,7 @@ class CommandRouterTests(unittest.TestCase):
                     with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
                         builder.main()
         self.assertIn("`rover-engine` is a compatibility alias", stderr.getvalue())
-        self.assertIn("Try: `rover doctor`", stderr.getvalue())
+        self.assertIn("Try: `menisik doctor`", stderr.getvalue())
 
     def test_builder_warns_when_legacy_pr_flag_is_used(self) -> None:
         with mock.patch("app.builder.setup_logging"), mock.patch(
@@ -123,7 +123,7 @@ class CommandRouterTests(unittest.TestCase):
                 with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
                     builder.main()
         self.assertIn("`--pr` is deprecated. Prefer `--contrib`.", stderr.getvalue())
-        self.assertIn("Equivalent command: `rover run owner/repo`.", stderr.getvalue())
+        self.assertIn("Equivalent command: `menisik run owner/repo`.", stderr.getvalue())
 
     def test_builder_warns_when_rover_engine_alias_can_suggest_targeted_run(self) -> None:
         with mock.patch("sys.argv", ["rover-engine", "--contrib", "owner/repo", "--dry-run"]):
@@ -132,7 +132,7 @@ class CommandRouterTests(unittest.TestCase):
             ), mock.patch("app.builder.run_contribution_mode"):
                 with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
                     builder.main()
-        self.assertIn("Try: `rover run owner/repo --dry-run`", stderr.getvalue())
+        self.assertIn("Try: `menisik run owner/repo --dry-run`", stderr.getvalue())
 
     def test_builder_emits_single_deprecation_warning_for_alias_and_legacy_flag(self) -> None:
         with mock.patch("sys.argv", ["rover-engine", "--pr", "owner/repo"]):
