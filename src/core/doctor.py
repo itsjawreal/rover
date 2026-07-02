@@ -31,17 +31,17 @@ from src.core.config import (
     MENISIK_NOTIFY_PROGRESS,
     MENISIK_NOTIFY_STALL_SECONDS,
     MENISIK_NOTIFY_TRANSPORT,
-    ROVER_ARTIFACT_DIR,
-    ROVER_ARTIFACT_DIR_WRITABLE,
-    ROVER_CACHE_DIR,
-    ROVER_CACHE_DIR_WRITABLE,
-    ROVER_CONFIG_DIR,
-    ROVER_CONFIG_DIR_WRITABLE,
-    ROVER_HOME,
-    ROVER_HOME_WRITABLE,
-    ROVER_STATE_DIR,
-    ROVER_STATE_DIR_WRITABLE,
-    ROVER_STORAGE_MODE,
+    MENISIK_ARTIFACT_DIR,
+    MENISIK_ARTIFACT_DIR_WRITABLE,
+    MENISIK_CACHE_DIR,
+    MENISIK_CACHE_DIR_WRITABLE,
+    MENISIK_CONFIG_DIR,
+    MENISIK_CONFIG_DIR_WRITABLE,
+    MENISIK_HOME,
+    MENISIK_HOME_WRITABLE,
+    MENISIK_STATE_DIR,
+    MENISIK_STATE_DIR_WRITABLE,
+    MENISIK_STORAGE_MODE,
     TELEGRAM_CHAT,
     TELEGRAM_TOKEN,
     _is_unusable_cross_os_cli_path,
@@ -400,35 +400,35 @@ def collect_doctor_checks() -> list[DoctorCheck]:
         DoctorCheck(
             "storage-mode",
             "ok",
-            f"mode={ROVER_STORAGE_MODE} home={ROVER_HOME}",
+            f"mode={MENISIK_STORAGE_MODE} home={MENISIK_HOME}",
         )
     )
     checks.append(
         DoctorCheck(
             "storage-state",
-            "ok" if ROVER_STATE_DIR_WRITABLE else "warn",
-            f"state={ROVER_STATE_DIR}",
+            "ok" if MENISIK_STATE_DIR_WRITABLE else "warn",
+            f"state={MENISIK_STATE_DIR}",
         )
     )
     checks.append(
         DoctorCheck(
             "storage-cache",
-            "ok" if ROVER_CACHE_DIR_WRITABLE else "warn",
-            f"cache={ROVER_CACHE_DIR}",
+            "ok" if MENISIK_CACHE_DIR_WRITABLE else "warn",
+            f"cache={MENISIK_CACHE_DIR}",
         )
     )
     checks.append(
         DoctorCheck(
             "storage-artifacts",
-            "ok" if ROVER_ARTIFACT_DIR_WRITABLE else "warn",
-            f"artifacts={ROVER_ARTIFACT_DIR}",
+            "ok" if MENISIK_ARTIFACT_DIR_WRITABLE else "warn",
+            f"artifacts={MENISIK_ARTIFACT_DIR}",
         )
     )
     checks.append(
         DoctorCheck(
             "storage-config",
-            "ok" if ROVER_CONFIG_DIR_WRITABLE and ROVER_HOME_WRITABLE else "warn",
-            f"config={ROVER_CONFIG_DIR}",
+            "ok" if MENISIK_CONFIG_DIR_WRITABLE and MENISIK_HOME_WRITABLE else "warn",
+            f"config={MENISIK_CONFIG_DIR}",
         )
     )
 
@@ -686,7 +686,7 @@ def build_doctor_report() -> str:
             )
         elif check.name.startswith("storage-") and check.status != "ok":
             actions.append(
-                "Check Rover local storage permissions or override `ROVER_HOME` / `ROVER_STATE_DIR` to a writable user-local path."
+                "Check Menisik local storage permissions or override `MENISIK_HOME` / `MENISIK_STATE_DIR` to a writable user-local path."
             )
         elif check.name == "github-token" and check.status != "ok":
             actions.append("Add `GH_TOKEN` or `GITHUB_TOKEN`, or run `gh auth login`, so the engine can make authenticated GitHub API calls.")

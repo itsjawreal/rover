@@ -100,7 +100,7 @@ def _ensure_dir(path: Path) -> bool:
 
 
 def _detect_storage_mode() -> str:
-    explicit = os.getenv("ROVER_STORAGE_MODE", "").strip().lower()
+    explicit = _env_raw("MENISIK_STORAGE_MODE").lower()
     if explicit in {"persistent", "workspace", "ephemeral"}:
         return explicit
     ci_markers = (
@@ -142,50 +142,84 @@ def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return values or default
 
 
-def _default_persistent_rover_home() -> Path:
+def _default_persistent_home(name_title: str, name_lower: str) -> Path:
     if os.name == "nt":
         base = Path(os.getenv("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
-        return base / "Rover"
+        return base / name_title
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Rover"
+        return Path.home() / "Library" / "Application Support" / name_title
     xdg_state_home = os.getenv("XDG_STATE_HOME", "").strip()
     if xdg_state_home:
-        return Path(xdg_state_home).expanduser() / "rover"
-    return Path.home() / ".local" / "state" / "rover"
+        return Path(xdg_state_home).expanduser() / name_lower
+    return Path.home() / ".local" / "state" / name_lower
 
 
-def _default_ephemeral_rover_home() -> Path:
+def _default_ephemeral_home(name_lower: str) -> Path:
     user = os.getenv("USER") or os.getenv("USERNAME") or getpass.getuser() or "user"
-    return Path(tempfile.gettempdir()) / f"rover-{user}"
+    return Path(tempfile.gettempdir()) / f"{name_lower}-{user}"
 
 
-def _candidate_rover_homes(mode: str) -> list[Path]:
-    candidates: list[Path] = []
-    if explicit := os.getenv("ROVER_HOME", "").strip():
-        candidates.append(Path(explicit).expanduser())
+def _candidate_menisik_homes(mode: str) -> list[tuple[Path, Path | None]]:
+    """Candidate home dirs as (new, legacy) pairs; legacy is the pre-rename rover path."""
+    candidates: list[tuple[Path, Path | None]] = []
+    if explicit := _env_raw("MENISIK_HOME"):
+        candidates.append((Path(explicit).expanduser(), None))
     if mode == "workspace":
-        candidates.append(ROOT / ".rover")
+        candidates.append((ROOT / ".menisik", ROOT / ".rover"))
     elif mode == "ephemeral":
-        candidates.append(_default_ephemeral_rover_home())
+        candidates.append((_default_ephemeral_home("menisik"), _default_ephemeral_home("rover")))
     else:
-        candidates.append(_default_persistent_rover_home())
-    candidates.append(Path.home() / ".rover")
-    candidates.append(ROOT / ".rover")
+        candidates.append(
+            (_default_persistent_home("Menisik", "menisik"), _default_persistent_home("Rover", "rover"))
+        )
+    candidates.append((Path.home() / ".menisik", Path.home() / ".rover"))
+    candidates.append((ROOT / ".menisik", ROOT / ".rover"))
     return candidates
 
 
-def _resolve_rover_home(mode: str) -> tuple[Path, bool]:
-    for candidate in _candidate_rover_homes(mode):
+def _adopt_legacy_home(new: Path, legacy: Path) -> Path:
+    """Move a pre-rename rover storage dir to its menisik location once.
+
+    If the move fails (permissions, cross-device, locks), keep reading from the
+    legacy location and warn instead of splitting state across two dirs.
+    """
+    if new.exists() or not legacy.is_dir():
+        return new
+    try:
+        new.parent.mkdir(parents=True, exist_ok=True)
+        legacy.rename(new)
+        log.warning("Migrated legacy storage dir %s -> %s", legacy, new)
+        return new
+    except OSError:
+        pass
+    try:
+        shutil.move(str(legacy), str(new))
+        log.warning("Migrated legacy storage dir %s -> %s", legacy, new)
+        return new
+    except (OSError, shutil.Error):
+        log.warning(
+            "Found legacy storage dir %s but could not migrate it to %s; "
+            "continuing to use the legacy location.",
+            legacy,
+            new,
+        )
+        return legacy
+
+
+def _resolve_menisik_home(mode: str) -> tuple[Path, bool]:
+    for candidate, legacy in _candidate_menisik_homes(mode):
         resolved = candidate.expanduser()
+        if legacy is not None:
+            resolved = _adopt_legacy_home(resolved, legacy.expanduser())
         if _ensure_dir(resolved):
             return resolved.resolve(), True
-    fallback = (ROOT / ".rover").resolve()
+    fallback = (ROOT / ".menisik").resolve()
     fallback.mkdir(parents=True, exist_ok=True)
     return fallback, False
 
 
 def _resolve_storage_subdir(env_name: str, default_name: str, *, home: Path) -> tuple[Path, bool]:
-    if explicit := os.getenv(env_name, "").strip():
+    if explicit := _env_raw(env_name):
         candidate = Path(explicit).expanduser()
     else:
         candidate = home / default_name
@@ -196,23 +230,23 @@ def _resolve_storage_subdir(env_name: str, default_name: str, *, home: Path) -> 
     return fallback, False
 
 
-ROVER_STORAGE_MODE = _detect_storage_mode()
-ROVER_HOME, ROVER_HOME_WRITABLE = _resolve_rover_home(ROVER_STORAGE_MODE)
-ROVER_STATE_DIR, ROVER_STATE_DIR_WRITABLE = _resolve_storage_subdir(
-    "ROVER_STATE_DIR", "state", home=ROVER_HOME
+MENISIK_STORAGE_MODE = _detect_storage_mode()
+MENISIK_HOME, MENISIK_HOME_WRITABLE = _resolve_menisik_home(MENISIK_STORAGE_MODE)
+MENISIK_STATE_DIR, MENISIK_STATE_DIR_WRITABLE = _resolve_storage_subdir(
+    "MENISIK_STATE_DIR", "state", home=MENISIK_HOME
 )
-ROVER_CACHE_DIR, ROVER_CACHE_DIR_WRITABLE = _resolve_storage_subdir(
-    "ROVER_CACHE_DIR", "cache", home=ROVER_HOME
+MENISIK_CACHE_DIR, MENISIK_CACHE_DIR_WRITABLE = _resolve_storage_subdir(
+    "MENISIK_CACHE_DIR", "cache", home=MENISIK_HOME
 )
-ROVER_ARTIFACT_DIR, ROVER_ARTIFACT_DIR_WRITABLE = _resolve_storage_subdir(
-    "ROVER_ARTIFACT_DIR", "artifacts", home=ROVER_HOME
+MENISIK_ARTIFACT_DIR, MENISIK_ARTIFACT_DIR_WRITABLE = _resolve_storage_subdir(
+    "MENISIK_ARTIFACT_DIR", "artifacts", home=MENISIK_HOME
 )
-ROVER_CONFIG_DIR, ROVER_CONFIG_DIR_WRITABLE = _resolve_storage_subdir(
-    "ROVER_CONFIG_DIR", "config", home=ROVER_HOME
+MENISIK_CONFIG_DIR, MENISIK_CONFIG_DIR_WRITABLE = _resolve_storage_subdir(
+    "MENISIK_CONFIG_DIR", "config", home=MENISIK_HOME
 )
-PR_LOG_FILE = ROVER_STATE_DIR / "pr_log.json"
-SECURITY_BLACKLIST_FILE = ROVER_STATE_DIR / "security_blacklist.json"
-PROJECT_BLACKLIST_FILE = ROVER_STATE_DIR / "project_blacklist.json"
+PR_LOG_FILE = MENISIK_STATE_DIR / "pr_log.json"
+SECURITY_BLACKLIST_FILE = MENISIK_STATE_DIR / "security_blacklist.json"
+PROJECT_BLACKLIST_FILE = MENISIK_STATE_DIR / "project_blacklist.json"
 
 DATA_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)

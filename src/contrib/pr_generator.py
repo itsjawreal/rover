@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.core.ai import call_ai, _parse_json, _syntax_ok, _syntax_ok_ts, get_scaled_timeout, get_usage
-from src.core.config import DATA_DIR, ROVER_ARTIFACT_DIR
+from src.core.config import DATA_DIR, MENISIK_ARTIFACT_DIR
 from src.contrib.contribution_engine import ContributionEngine
 from src.contrib.contribution_store import PREngineStore
 from src.contrib.opportunity_engine import (
@@ -784,7 +784,7 @@ def build_repo_inspect_report(candidate: RepoCandidate) -> str:
 
 def write_repo_inspect_artifact(data: dict[str, object]) -> Path:
     repo_slug = str(data.get("repo", "unknown")).replace("/", "__")
-    artifact_dir = ROVER_ARTIFACT_DIR / "inspect" / repo_slug
+    artifact_dir = MENISIK_ARTIFACT_DIR / "inspect" / repo_slug
     artifact_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     artifact_path = artifact_dir / f"{timestamp}.md"

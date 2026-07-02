@@ -12,7 +12,8 @@
 data/*.json
 data/*.sqlite3
 data/.ai_prompts/
-.rover/state/
+.rover/
+.menisik/
 .stream_partials/
 .claude/scheduled_tasks.lock
 

@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from src.core.config import PR_LOG_FILE, ROOT, ROVER_STATE_DIR
+from src.core.config import PR_LOG_FILE, ROOT, MENISIK_STATE_DIR
 from src.contrib.opportunity_engine import Opportunity, count_repo_files
 from src.github.scraper import RepoCandidate
 
@@ -18,7 +18,7 @@ def _default_pr_engine_db_file() -> Path:
     if env_path := os.getenv("PR_ENGINE_DB_PATH", "").strip():
         return Path(env_path).expanduser()
 
-    return ROVER_STATE_DIR / "pr_engine.sqlite3"
+    return MENISIK_STATE_DIR / "pr_engine.sqlite3"
 
 
 PR_ENGINE_DB_FILE = _default_pr_engine_db_file()
