@@ -67,7 +67,20 @@ def bullet_block(title: str, items: list[str]) -> str:
 # ── Rich styled UI ────────────────────────────────────────────
 
 _TAGLINE = "autonomous GitHub contribution agent"
-_VERSION = "0.1.0"
+
+
+def _resolve_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("menisik")
+    except Exception:
+        # running from a source checkout without an installed menisik dist
+        return "0.2.0"
+
+
+_VERSION = _resolve_version()
+ENGINE_VERSION = _VERSION
 
 _STATUS_COLOR = {"open": "yellow", "merged": "green", "closed": "red"}
 _STATUS_ICON  = {"open": "●", "merged": "✓", "closed": "✗"}

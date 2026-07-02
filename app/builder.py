@@ -183,11 +183,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    from src.core.cli_ui import ENGINE_VERSION
+
     parser.add_argument(
         "--version", "-V",
         action="version",
         version=(
-            "menisik 0.2.0\n"
+            f"menisik {ENGINE_VERSION}\n"
             f"root={Path(__file__).resolve().parents[1]}\n"
             f"python={sys.executable}"
         ),
