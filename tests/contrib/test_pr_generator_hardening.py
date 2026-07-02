@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.contrib.contribution_store import PREngineStore
 from src.contrib.pr_generator import (
@@ -1558,6 +1558,55 @@ class PRGeneratorHardeningTests(unittest.TestCase):
                 generate_pr_improvement(candidate, logging.getLogger("test"))
 
         self.assertIn("missing fields", str(ctx.exception))
+
+    def test_generate_pr_improvement_treats_ai_reject_verdict_as_final_without_retry(self) -> None:
+        # Regression: agentic CLI backends (Claude Code) refuse to fabricate a patch
+        # when the scanner evidence is wrong, but had no JSON escape hatch — they
+        # replied in prose, which failed _parse_json and burned all retries on the
+        # same definitive verdict.
+        store = self._make_store()
+        run_id = store.start_run(mode="contrib", target_count=1)
+        candidate = RepoCandidate(
+            name="sample",
+            full_name="example/sample",
+            description="Sample repo",
+            stars=10,
+            forks=2,
+            license="MIT",
+            url="https://github.com/example/sample",
+            default_branch="main",
+            pushed_days_ago=1,
+            topics=["python"],
+            files={"sample.py": "def run():\n    return 1\n"},
+        )
+        reject_json = (
+            '{"decision":"reject",'
+            '"reason":"line 36 is a class declaration, not an exception handler"}'
+        )
+        opportunity = Opportunity(
+            repo_full_name=candidate.full_name,
+            target_file="sample.py",
+            pattern_type="overbroad_exception_handling",
+            failure_mode="line 36 catches a broad exception and only logs/returns.",
+            evidence="except Exception at line 36",
+            patch_scope=1,
+            test_target="tests/test_sample.py",
+            acceptance_score=90,
+        )
+
+        mocked_call_ai = MagicMock(return_value=reject_json)
+        with patch("src.contrib.pr_generator._ENGINE_STORE", store), \
+             patch("src.contrib.pr_generator._ACTIVE_RUN_ID", run_id), \
+             patch("src.contrib.pr_generator.generate_dep_update", return_value=None), \
+             patch("src.contrib.pr_generator._discover_opportunities", return_value=(opportunity, 123)), \
+             patch("src.contrib.pr_generator.call_ai", mocked_call_ai), \
+             patch("src.contrib.pr_generator.time.sleep"):
+            with self.assertRaises(PRGeneratorError) as ctx:
+                generate_pr_improvement(candidate, logging.getLogger("test"))
+
+        self.assertIn("AI rejected the bug target", str(ctx.exception))
+        self.assertIn("class declaration", str(ctx.exception))
+        self.assertEqual(mocked_call_ai.call_count, 1)
 
     def test_check_all_prs_reviews_timeout_does_not_propagate_or_lose_data(self) -> None:
         # Regression: if the reviews fetch timed out, TimeoutExpired previously escaped the

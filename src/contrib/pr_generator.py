@@ -4246,6 +4246,13 @@ Do not touch files outside `expected_files`. Do not widen scope beyond the appro
 ## safety_proof requirement
 You MUST provide a `safety_proof` field. Write one paragraph explaining why your change cannot alter correct behavior for any valid input. If you cannot write a convincing proof, choose a different improvement.
 
+## If the bug target does not hold up
+If the stated evidence is factually wrong for the actual code, the problem is already handled, or no safe minimal patch exists, do NOT invent a patch and do NOT explain in prose. Respond with JSON only:
+{{
+  "decision": "reject",
+  "reason": "one sentence: why the bug target does not hold up"
+}}
+
 ## Output format
 Respond with JSON only — no prose before or after:
 {{
@@ -4292,6 +4299,13 @@ Do not invent adjacent capabilities, and do not refactor beyond what is required
 
 ## safety_proof requirement
 You MUST provide a `safety_proof` field. Explain why the patch stays narrow and why existing working paths are preserved while adding only the requested capability.
+
+## If the enhancement target does not hold up
+If the maintainer signal is not real in the actual code, the capability already exists, or no narrow safe patch is possible, do NOT invent a patch and do NOT explain in prose. Respond with JSON only:
+{{
+  "decision": "reject",
+  "reason": "one sentence: why the enhancement target does not hold up"
+}}
 
 ## Output format
 Respond with JSON only:
@@ -4358,8 +4372,6 @@ Respond with JSON only:
             raw = call_ai(_active_prompt, timeout=timeout)
             _record_stage_token_spend("generate", before_tokens)
             result = _parse_json(raw)
-            _ENGINE_STORE.record_attempt(opportunity_id, "EXECUTE", attempt, "parsed", "AI produced a candidate patch.")
-            _bump_run_metric("generated")
         except Exception as exc:
             _ENGINE_STORE.record_attempt(opportunity_id, "EXECUTE", attempt, "failed", str(exc)[:300])
             if attempt == max_generate_attempts:
@@ -4375,6 +4387,26 @@ Respond with JSON only:
             log.warning("AI attempt %d failed: %s — retrying", attempt, exc)
             time.sleep(4)
             continue
+
+        # ── AI verdict: the bug target itself does not hold up ─
+        # Agentic CLI backends verify evidence against real code; a reject
+        # verdict is definitive for this opportunity, so do not retry it.
+        if str(result.get("decision", "")).strip().lower() == "reject":
+            reason = str(result.get("reason") or "").strip() or "AI rejected the bug target without a reason"
+            _bump_run_metric("ai_rejected_target")
+            _ENGINE_STORE.record_attempt(opportunity_id, "EXECUTE", attempt, "ai_rejected_target", reason[:300])
+            _ENGINE_STORE.reject_opportunity(
+                _ACTIVE_RUN_ID,
+                opportunity,
+                "ai_rejected_bug_target",
+                reason,
+                "EXECUTE",
+                opportunity_id=opportunity_id,
+            )
+            raise PRGeneratorError(f"AI rejected the bug target: {reason}")
+
+        _ENGINE_STORE.record_attempt(opportunity_id, "EXECUTE", attempt, "parsed", "AI produced a candidate patch.")
+        _bump_run_metric("generated")
 
         # ── Field validation ──────────────────────────────────
         required = {"pr_title", "pr_body", "changed_files", "improvement_type", "rationale", "safety_proof"}
