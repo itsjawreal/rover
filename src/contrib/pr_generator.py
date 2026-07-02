@@ -4043,6 +4043,41 @@ def _is_terminal_structural_rejection(reason: str) -> bool:
     return "generated files were identical to the originals" in normalized
 
 
+_FABRICATED_TESTING_MARKERS = (
+    "manually ran",
+    "manually tested",
+    "manually verified",
+    "manually confirmed",
+    "i ran ",
+    "we ran ",
+    "ran each",
+    "ran the test",
+    "ran the existing",
+    "executed the test",
+    "executed each",
+    "tested locally",
+    "ran locally",
+    "verified locally",
+    "confirmed locally",
+    "re-ran ",
+    "reran ",
+)
+
+
+def _fabricated_testing_claim(pr_body: str) -> str | None:
+    """Return the offending phrase when a PR body claims verification that never ran.
+
+    The generation stage works from a static source dump — nothing from the
+    target repo is executed — so any claim of having run code, tests, or
+    commands is fabricated and would mislead maintainers.
+    """
+    lowered = pr_body.lower()
+    for marker in _FABRICATED_TESTING_MARKERS:
+        if marker in lowered:
+            return marker
+    return None
+
+
 # ── AI improvement generator ──────────────────────────────────
 def generate_pr_improvement(
     candidate: RepoCandidate,
@@ -4243,6 +4278,9 @@ Only fix what is already broken or missing from existing logic.
 **Rule 6 — Stay inside the approved patch plan.**
 Do not touch files outside `expected_files`. Do not widen scope beyond the approved failure mode.
 
+**Rule 7 — Never fabricate verification.**
+You are working from static analysis of the source dump above; you have not run this repo's code, tests, or CLI. The `## Testing` section must honestly describe that reasoning (inspection, call-site tracing, behavior-preservation analysis). Claiming to have run, executed, or manually tested anything is an automatic reject.
+
 ## safety_proof requirement
 You MUST provide a `safety_proof` field. Write one paragraph explaining why your change cannot alter correct behavior for any valid input. If you cannot write a convincing proof, choose a different improvement.
 
@@ -4258,7 +4296,7 @@ Respond with JSON only — no prose before or after:
 {{
   "improvement_type": "bug_fix|security|resource_leak|error_handling|race_condition",
   "pr_title": "conventional-commit title, max 72 chars (fix:/security:)",
-  "pr_body": "markdown PR body with exactly these sections:\\n## Summary\\n(1-2 sentences: what the bug was and what the fix does)\\n## Why it matters\\n(1-2 sentences: concrete failure scenario without the fix)\\n## Testing\\n(1-2 sentences: how correctness was verified)\\nNo fluff, no extra sections.",
+  "pr_body": "markdown PR body with exactly these sections:\\n## Summary\\n(1-2 sentences: what the bug was and what the fix does)\\n## Why it matters\\n(1-2 sentences: concrete failure scenario without the fix)\\n## Testing\\n(1-2 sentences: honest verification note. You have NOT executed this repo's code, tests, or commands — describe only the static analysis and review actually performed, e.g. 'Traced all call sites of X and confirmed by inspection that ...'. Never claim to have run, executed, or manually tested anything.)\\nNo fluff, no extra sections.",
   "rationale": "one sentence: why this will be accepted — name the specific failure the fix prevents",
   "safety_proof": "one paragraph proving the change cannot break any currently-working input path",
   "changed_files": {{
@@ -4296,6 +4334,7 @@ Do not invent adjacent capabilities, and do not refactor beyond what is required
 - No style-only changes
 - No speculative feature ideas not grounded in the provided issue/comment evidence
 - Keep the patch to one or two files
+- Never fabricate verification: you have not run this repo's code or tests, so the `## Testing` section must describe static analysis only and must not claim any execution or manual testing
 
 ## safety_proof requirement
 You MUST provide a `safety_proof` field. Explain why the patch stays narrow and why existing working paths are preserved while adding only the requested capability.
@@ -4312,7 +4351,7 @@ Respond with JSON only:
 {{
   "improvement_type": "{opportunity.opportunity_kind}",
   "pr_title": "conventional-commit title, max 72 chars (feat:/enhancement:)",
-  "pr_body": "markdown PR body with exactly these sections:\\n## Summary\\n(1-2 sentences: what enhancement was added)\\n## Why it matters\\n(1-2 sentences: what maintainer-signaled gap this addresses)\\n## Testing\\n(1-2 sentences: how correctness was verified)\\nNo fluff, no extra sections.",
+  "pr_body": "markdown PR body with exactly these sections:\\n## Summary\\n(1-2 sentences: what enhancement was added)\\n## Why it matters\\n(1-2 sentences: what maintainer-signaled gap this addresses)\\n## Testing\\n(1-2 sentences: honest verification note. You have NOT executed this repo's code, tests, or commands — describe only the static analysis and review actually performed, e.g. 'Traced all call sites of X and confirmed by inspection that ...'. Never claim to have run, executed, or manually tested anything.)\\nNo fluff, no extra sections.",
   "rationale": "one sentence naming the explicit maintainer signal this patch satisfies",
   "safety_proof": "one paragraph explaining why the change stays narrow and preserves existing behavior",
   "changed_files": {{
@@ -4427,6 +4466,36 @@ Respond with JSON only:
                 )
                 raise PRGeneratorError(f"AI response missing fields: {missing}")
             log.warning("Missing fields in attempt %d: %s — retrying", attempt, missing)
+            time.sleep(4)
+            continue
+
+        # ── Honesty gate: reject Testing claims about runs that never happened ─
+        fabricated_marker = _fabricated_testing_claim(str(result.get("pr_body") or ""))
+        if fabricated_marker:
+            _ENGINE_STORE.record_attempt(
+                opportunity_id, "EXECUTE", attempt, "fabricated_testing_claim", fabricated_marker
+            )
+            if attempt == max_generate_attempts:
+                _ENGINE_STORE.reject_opportunity(
+                    _ACTIVE_RUN_ID,
+                    opportunity,
+                    "fabricated_testing_claim",
+                    f"PR body kept claiming verification that never ran ({fabricated_marker!r}).",
+                    "EXECUTE",
+                    opportunity_id=opportunity_id,
+                )
+                raise PRGeneratorError(
+                    f"PR body claims verification that never ran ({fabricated_marker!r})"
+                )
+            log.warning(
+                "PR body claims verification that never ran (%r) — retrying with honesty constraint",
+                fabricated_marker,
+            )
+            _structural_retry_hint = (
+                "Your previous ## Testing section claimed to have run, executed, or manually tested code. "
+                "Nothing from this repo was executed. Rewrite the Testing section to describe only the "
+                "static analysis performed (inspection, call-site tracing, behavior-preservation reasoning)."
+            )
             time.sleep(4)
             continue
 

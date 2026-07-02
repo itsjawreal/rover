@@ -35,6 +35,7 @@ from src.contrib.pr_generator import (
     _self_review_test_layout,
     _self_review_diff,
     _targeted_execution_mode,
+    _fabricated_testing_claim,
     _targeted_pattern_policy,
     _validate_candidate_scope,
     check_all_prs,
@@ -1607,6 +1608,80 @@ class PRGeneratorHardeningTests(unittest.TestCase):
         self.assertIn("AI rejected the bug target", str(ctx.exception))
         self.assertIn("class declaration", str(ctx.exception))
         self.assertEqual(mocked_call_ai.call_count, 1)
+
+    def test_fabricated_testing_claim_detects_execution_claims_only(self) -> None:
+        # Real fabricated claims from submitted PR bodies
+        self.assertIsNotNone(_fabricated_testing_claim(
+            "## Testing\nManually ran each symbol-taking subcommand with no argument."
+        ))
+        self.assertIsNotNone(_fabricated_testing_claim("I ran the script against sample inputs."))
+        self.assertIsNotNone(_fabricated_testing_claim("Tested locally with the bundled fixtures."))
+        self.assertIsNotNone(_fabricated_testing_claim("Executed the test suite and confirmed green."))
+        # Honest static-analysis wording must pass
+        self.assertIsNone(_fabricated_testing_claim(
+            "## Testing\nTraced all call sites of _require_symbol and confirmed by inspection "
+            "that valid invocations keep identical behavior."
+        ))
+        # Reproduction *suggestions* are not execution claims
+        self.assertIsNone(_fabricated_testing_claim(
+            "Reproduce by running `python3 trading.py price` with no argument."
+        ))
+        self.assertIsNone(_fabricated_testing_claim(""))
+
+    def test_generate_pr_improvement_rejects_fabricated_testing_claims_after_retries(self) -> None:
+        # Regression: submitted PR bodies claimed manual test runs that never
+        # happened (generation is static analysis only), misleading maintainers.
+        store = self._make_store()
+        run_id = store.start_run(mode="contrib", target_count=1)
+        candidate = RepoCandidate(
+            name="sample",
+            full_name="example/sample",
+            description="Sample repo",
+            stars=10,
+            forks=2,
+            license="MIT",
+            url="https://github.com/example/sample",
+            default_branch="main",
+            pushed_days_ago=1,
+            topics=["python"],
+            files={"sample.py": "def run():\n    return 1\n"},
+        )
+        fabricated_json = (
+            '{"improvement_type":"bug_fix","pr_title":"fix: guard missing value",'
+            '"pr_body":"## Summary\\nFix bug\\n## Why it matters\\nPrevents crash.\\n'
+            '## Testing\\nManually ran each subcommand and confirmed the fix.",'
+            '"rationale":"Prevents crash.",'
+            '"safety_proof":"The change only affects the failing path.",'
+            '"changed_files":{"sample.py":"def run():\\n    return 2\\n"}}'
+        )
+        opportunity = Opportunity(
+            repo_full_name=candidate.full_name,
+            target_file="sample.py",
+            pattern_type="missing_input_validation",
+            failure_mode="callers receive stale data on a valid invocation.",
+            evidence="the function body returns a hard-coded stale value",
+            patch_scope=1,
+            test_target="tests/test_sample.py",
+            acceptance_score=90,
+        )
+
+        mocked_call_ai = MagicMock(return_value=fabricated_json)
+        with patch("src.contrib.pr_generator._ENGINE_STORE", store), \
+             patch("src.contrib.pr_generator._ACTIVE_RUN_ID", run_id), \
+             patch("src.contrib.pr_generator.generate_dep_update", return_value=None), \
+             patch("src.contrib.pr_generator._discover_opportunities", return_value=(opportunity, 123)), \
+             patch("src.contrib.pr_generator.call_ai", mocked_call_ai), \
+             patch("src.contrib.pr_generator.time.sleep"):
+            with self.assertRaises(PRGeneratorError) as ctx:
+                generate_pr_improvement(candidate, logging.getLogger("test"))
+
+        self.assertIn("claims verification that never ran", str(ctx.exception))
+        # Retried with the honesty constraint before giving up
+        self.assertEqual(mocked_call_ai.call_count, 3)
+        self.assertIn(
+            "Rewrite the Testing section",
+            mocked_call_ai.call_args_list[1].args[0],
+        )
 
     def test_check_all_prs_reviews_timeout_does_not_propagate_or_lose_data(self) -> None:
         # Regression: if the reviews fetch timed out, TimeoutExpired previously escaped the
