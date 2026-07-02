@@ -18,6 +18,7 @@ from src.core.config import (
     CODEX_CMD_RESOLUTION,
     ENV_FILE,
     OPENROUTER_API_KEY,
+    OPENROUTER_BASE_URL,
     OPENROUTER_MODEL,
     OPENCLAW_CMD,
     OPENCLAW_CMD_RESOLUTION,
@@ -466,7 +467,6 @@ def collect_doctor_checks() -> list[DoctorCheck]:
     )
 
     if AI_BACKEND == "openrouter":
-        from src.core.config import OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_BASE_URL
         if OPENROUTER_API_KEY and OPENROUTER_MODEL:
             or_status, or_detail = "ok", f"key set, model={OPENROUTER_MODEL}, base={OPENROUTER_BASE_URL}"
         elif OPENROUTER_API_KEY:
