@@ -18,6 +18,7 @@ from urllib.parse import urlencode, urlparse
 
 import requests
 
+from src.core.config import env_int
 from src.core.github_auth import resolve_github_token
 
 log = logging.getLogger(__name__)
@@ -25,8 +26,8 @@ log = logging.getLogger(__name__)
 # ── Constants ────────────────────────────────────────────────
 _GITHUB_API = "https://api.github.com"
 _ALLOWED_LICENSES = {"mit", "apache-2.0", "bsd-2-clause", "bsd-3-clause", "isc", "unlicense"}
-_MAX_REPO_FILES = int(os.getenv("CONTRIB_MAX_REPO_FILES", "120"))
-_MAX_FILE_BYTES = int(os.getenv("CONTRIB_MAX_FILE_BYTES", "500000"))
+_MAX_REPO_FILES = env_int("CONTRIB_MAX_REPO_FILES", 120)
+_MAX_FILE_BYTES = env_int("CONTRIB_MAX_FILE_BYTES", 500000)
 _SKIP_EXTENSIONS = {
     ".png",
     ".jpg",
@@ -128,7 +129,7 @@ def _wait_for_rate_limit(resp: requests.Response, *, has_auth: bool) -> None:
     reset_ts = int(resp.headers.get("X-RateLimit-Reset", 0))
     now = int(time.time())
     wait_secs = max(10, (reset_ts - now) + 5) if reset_ts else 3600
-    max_wait = int(os.getenv("GITHUB_RATE_LIMIT_MAX_WAIT_SECS", "30"))
+    max_wait = env_int("GITHUB_RATE_LIMIT_MAX_WAIT_SECS", 30)
     if not has_auth:
         raise ScraperError(
             "GitHub API rate limit hit without a usable token. Use GH_TOKEN/GITHUB_TOKEN or a working `gh auth login` session."

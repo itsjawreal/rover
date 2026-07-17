@@ -6,19 +6,20 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.core.config import env_int
 from src.github.scraper import RepoCandidate
 
 # ── Constants ────────────────────────────────────────────────
-MAX_TARGET_FILE_LINES = int(os.getenv("PR_MAX_TARGET_FILE_LINES", "400"))
+MAX_TARGET_FILE_LINES = env_int("PR_MAX_TARGET_FILE_LINES", 400)
 # A large file may still host a tightly-scoped fix. When the evidence sits inside
 # a small function, the patch is narrow regardless of total file size, so the
 # whole-file breadth gate is overridden — but only up to a hard file-size cap so
 # pathologically large files still cost no AI. Downstream diff-size/patch-shape
 # gates measure the actual patch breadth precisely.
-MAX_LOCAL_SCOPE_LINES = int(os.getenv("PR_MAX_LOCAL_SCOPE_LINES", "60"))
-LOCALITY_FILE_CAP_FACTOR = int(os.getenv("PR_LOCALITY_FILE_CAP_FACTOR", "3"))
-QUALIFY_MIN_SCORE = int(os.getenv("PR_QUALIFY_MIN_SCORE", "70"))
-FEATURE_QUALIFY_MIN_SCORE = int(os.getenv("PR_FEATURE_QUALIFY_MIN_SCORE", "82"))
+MAX_LOCAL_SCOPE_LINES = env_int("PR_MAX_LOCAL_SCOPE_LINES", 60)
+LOCALITY_FILE_CAP_FACTOR = env_int("PR_LOCALITY_FILE_CAP_FACTOR", 3)
+QUALIFY_MIN_SCORE = env_int("PR_QUALIFY_MIN_SCORE", 70)
+FEATURE_QUALIFY_MIN_SCORE = env_int("PR_FEATURE_QUALIFY_MIN_SCORE", 82)
 VAGUE_MARKERS = (
     "safer",
     "cleaner",

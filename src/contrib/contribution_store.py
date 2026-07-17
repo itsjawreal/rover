@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from src.core.config import PR_LOG_FILE, ROOT, MENISIK_STATE_DIR
+from src.core.config import PR_LOG_FILE, ROOT, MENISIK_STATE_DIR, env_int
 from src.contrib.opportunity_engine import Opportunity, count_repo_files
 from src.github.scraper import RepoCandidate
 
@@ -22,7 +22,7 @@ def _default_pr_engine_db_file() -> Path:
 
 
 PR_ENGINE_DB_FILE = _default_pr_engine_db_file()
-REPO_COOLDOWN_DAYS = int(os.getenv("PR_REPO_COOLDOWN_DAYS", "3"))
+REPO_COOLDOWN_DAYS = env_int("PR_REPO_COOLDOWN_DAYS", 3)
 
 
 def _active_owner_login() -> str:

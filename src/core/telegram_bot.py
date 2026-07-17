@@ -216,10 +216,11 @@ class TelegramCommandBot:
                     pass
             return "Monitor status unavailable (MCP server not running in this process)."
 
-        # pass-through: forward unknown input as menisik subcommand tokens
-        if parts:
-            return self._menisik(*parts)
-        return _HELP_TEXT
+        # Unknown input is NOT forwarded to the CLI: anyone in the configured
+        # chat could otherwise smuggle arbitrary builder flags (e.g. a live
+        # submission run with limits overridden). Only the explicit commands
+        # above are executable from chat.
+        return f"Unknown command: {parts[0][:60]}\n\n{_HELP_TEXT}" if parts else _HELP_TEXT
 
     # ── Main polling loop ────────────────────────────────────
 
@@ -259,6 +260,12 @@ class TelegramCommandBot:
         with self._lock:
             if self._running:
                 return
+            # A previous loop may still be draining its long-poll (up to ~35 s
+            # after stop()). Refuse to start a second poller: two getUpdates
+            # loops fight over the offset and Telegram rejects one with 409.
+            if self._thread is not None and self._thread.is_alive():
+                log.warning("Telegram bot not restarted: previous polling loop is still winding down")
+                return
             self._running = True
             t = threading.Thread(target=self._loop, daemon=True, name="telegram-bot")
             self._thread = t
@@ -267,6 +274,11 @@ class TelegramCommandBot:
     def stop(self) -> None:
         with self._lock:
             self._running = False
+            t = self._thread
+        # Best-effort wait so an immediate restart doesn't race the old poller;
+        # the loop exits at the next long-poll return (bounded by its timeout).
+        if t is not None and t is not threading.current_thread():
+            t.join(timeout=2)
 
     @property
     def running(self) -> bool:

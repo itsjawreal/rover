@@ -203,12 +203,18 @@ class AgentStructureTests(unittest.TestCase):
         self.assertEqual(result.sandbox_outcome, "sandbox_retry_failed")
         self.assertTrue(result.sandbox_retry_used)
 
-    def test_run_sandbox_validation_returns_verified_on_compile_timeout(self) -> None:
+    def test_run_sandbox_validation_compile_timeout_passes_without_verified_claim(self) -> None:
+        # A compile timeout is an infra issue: the patch must not be blocked
+        # (status stays "passed", sandbox_output empty → non-actionable path,
+        # no repair retry), but code that never compiled must never be
+        # reported as sandbox-verified.
         import subprocess
         from src.contrib.validator import run_sandbox_validation
         with patch("src.contrib.validator.subprocess.run", side_effect=subprocess.TimeoutExpired("py_compile", 15)):
             result = run_sandbox_validation({"app.py": "x = 1\n"})
-        self.assertTrue(result.sandbox_verified)
+        self.assertEqual(result.status, "passed")
+        self.assertFalse(result.sandbox_verified)
+        self.assertEqual(result.sandbox_output, "")
 
     def test_run_sandbox_validation_returns_verified_on_test_timeout(self) -> None:
         import subprocess

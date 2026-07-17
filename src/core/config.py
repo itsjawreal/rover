@@ -143,6 +143,31 @@ def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
     return value
 
 
+def env_int(name: str, default: int) -> int:
+    """Parse an int env var; a malformed value logs a warning and falls back
+    to the default instead of crashing every command at import time."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        log.warning("Ignoring invalid integer %s=%r; using default %s", name, raw, default)
+        return default
+
+
+def env_float(name: str, default: float) -> float:
+    """Parse a float env var; malformed values fall back to the default."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        log.warning("Ignoring invalid number %s=%r; using default %s", name, raw, default)
+        return default
+
+
 def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     raw = _env_raw(name)
     if not raw:
@@ -264,7 +289,7 @@ RUNS_DIR.mkdir(exist_ok=True)
 
 # ── Runtime flags ────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
-LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "7"))
+LOG_RETENTION_DAYS = env_int("LOG_RETENTION_DAYS", 7)
 ENABLE_DEP_UPDATE = os.getenv("ENABLE_DEP_UPDATE", "true").strip().lower() != "false"
 
 
@@ -432,8 +457,8 @@ def _default_model_series() -> str:
 AGENT_TOOL = os.getenv("AGENT_TOOL", _default_agent_tool()).strip() or _default_agent_tool()
 MODEL_SERIES = os.getenv("MODEL_SERIES", _default_model_series()).strip() or _default_model_series()
 
-AI_TIMEOUT_MULTIPLIER = float(os.getenv("AI_TIMEOUT_MULTIPLIER", "1.0"))
-AI_TIMEOUT_MAX_SECONDS = int(os.getenv("AI_TIMEOUT_MAX_SECONDS", "900"))
+AI_TIMEOUT_MULTIPLIER = env_float("AI_TIMEOUT_MULTIPLIER", 1.0)
+AI_TIMEOUT_MAX_SECONDS = env_int("AI_TIMEOUT_MAX_SECONDS", 900)
 
 
 # ── Notifications ────────────────────────────────────────────

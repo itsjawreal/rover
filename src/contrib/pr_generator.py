@@ -6,15 +6,17 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import time
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from src.core.ai import call_ai, _parse_json, _syntax_ok, _syntax_ok_ts, get_scaled_timeout, get_usage
-from src.core.config import DATA_DIR, MENISIK_ARTIFACT_DIR
+from src.core.config import DATA_DIR, MENISIK_ARTIFACT_DIR, env_int
 from src.contrib.contribution_engine import ContributionEngine
 from src.contrib.contribution_store import PREngineStore
 from src.contrib.opportunity_engine import (
@@ -94,25 +96,25 @@ _CONTRIBUTION_ENGINE_STORE_REF: object | None = None
 _PATTERN_SCANNER = PatternScanner()
 _ACTIVE_RUN_ID: int | None = None
 
-_PR_MIN_STARS  = int(os.getenv("PR_MIN_STARS",  "300"))
-_PR_MAX_STARS  = int(os.getenv("PR_MAX_STARS",  "6000"))
-_PR_MAX_PUSHED = int(os.getenv("PR_MAX_PUSHED_DAYS", "45"))
-_PR_MIN_ISSUES = int(os.getenv("PR_MIN_OPEN_ISSUES", "1"))
+_PR_MIN_STARS  = env_int("PR_MIN_STARS", 300)
+_PR_MAX_STARS  = env_int("PR_MAX_STARS", 6000)
+_PR_MAX_PUSHED = env_int("PR_MAX_PUSHED_DAYS", 45)
+_PR_MIN_ISSUES = env_int("PR_MIN_OPEN_ISSUES", 1)
 
-_PR_MIN_FORKS = int(os.getenv("PR_MIN_FORKS", "20"))
-_PR_MAX_TOTAL_FILES = int(os.getenv("PR_MAX_TOTAL_FILES", "130"))
-_PR_MAX_PY_FILES = int(os.getenv("PR_MAX_PY_FILES", "75"))
-_PR_ACCEPTANCE_SHORTLIST = int(os.getenv("PR_ACCEPTANCE_SHORTLIST", "6"))
-_PR_TARGETED_MAX_TOTAL_FILES = int(os.getenv("PR_TARGETED_MAX_TOTAL_FILES", str(_PR_MAX_TOTAL_FILES)))
-_PR_TARGETED_MAX_PY_FILES = int(os.getenv("PR_TARGETED_MAX_PY_FILES", str(_PR_MAX_PY_FILES)))
+_PR_MIN_FORKS = env_int("PR_MIN_FORKS", 20)
+_PR_MAX_TOTAL_FILES = env_int("PR_MAX_TOTAL_FILES", 130)
+_PR_MAX_PY_FILES = env_int("PR_MAX_PY_FILES", 75)
+_PR_ACCEPTANCE_SHORTLIST = env_int("PR_ACCEPTANCE_SHORTLIST", 6)
+_PR_TARGETED_MAX_TOTAL_FILES = env_int("PR_TARGETED_MAX_TOTAL_FILES", _PR_MAX_TOTAL_FILES)
+_PR_TARGETED_MAX_PY_FILES = env_int("PR_TARGETED_MAX_PY_FILES", _PR_MAX_PY_FILES)
 _PR_TARGETED_ALLOW_BROAD = os.getenv("PR_TARGETED_ALLOW_BROAD", "").strip().lower() in {"1", "true", "yes", "on"}
 _PR_RECON_ENABLED = os.getenv("PR_RECON_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 _FIRST_PR_MODE_DEFAULT = os.getenv("CONTRIB_FIRST_PR_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
-_FIRST_PR_MAX_STARS = int(os.getenv("FIRST_PR_MAX_STARS", "2500"))
-_FIRST_PR_MAX_PUSHED_DAYS = int(os.getenv("FIRST_PR_MAX_PUSHED_DAYS", "30"))
-_FIRST_PR_MAX_TOTAL_FILES = int(os.getenv("FIRST_PR_MAX_TOTAL_FILES", "90"))
-_FIRST_PR_MAX_PY_FILES = int(os.getenv("FIRST_PR_MAX_PY_FILES", "45"))
-_FIRST_PR_MIN_TEST_FILES = int(os.getenv("FIRST_PR_MIN_TEST_FILES", "1"))
+_FIRST_PR_MAX_STARS = env_int("FIRST_PR_MAX_STARS", 2500)
+_FIRST_PR_MAX_PUSHED_DAYS = env_int("FIRST_PR_MAX_PUSHED_DAYS", 30)
+_FIRST_PR_MAX_TOTAL_FILES = env_int("FIRST_PR_MAX_TOTAL_FILES", 90)
+_FIRST_PR_MAX_PY_FILES = env_int("FIRST_PR_MAX_PY_FILES", 45)
+_FIRST_PR_MIN_TEST_FILES = env_int("FIRST_PR_MIN_TEST_FILES", 1)
 _LANE_PRESETS: dict[str, dict[str, object]] = {
     "general": {
         "keywords": set(),
@@ -312,14 +314,14 @@ _NEGATIVE_PR_SIGNAL_RE = re.compile(
     r"\b(ai|bot|generated|spam|unsolicited|no tests?|missing tests?|failing tests?|ci failed|too broad|low quality)\b",
     re.IGNORECASE,
 )
-_TARGETED_SHORTLIST_LIMIT = int(os.getenv("PR_TARGETED_SHORTLIST_LIMIT", "2"))
-_TARGETED_VIABLE_LIMIT = int(os.getenv("PR_TARGETED_VIABLE_LIMIT", "1"))
-_TARGETED_PLAN_ATTEMPTS = int(os.getenv("PR_TARGETED_PLAN_ATTEMPTS", "2"))
-_TARGETED_GENERATE_ATTEMPTS = int(os.getenv("PR_TARGETED_GENERATE_ATTEMPTS", "2"))
-_TARGETED_SELF_REVIEW_RETRIES = int(os.getenv("PR_TARGETED_SELF_REVIEW_RETRIES", "1"))
-_TARGETED_MAX_CHANGED_FILES = int(os.getenv("PR_TARGETED_MAX_CHANGED_FILES", "2"))
-_TARGETED_MAX_DIFF_LINES = int(os.getenv("PR_TARGETED_MAX_DIFF_LINES", "120"))
-_TARGETED_MIN_PATCHABILITY_SCORE = int(os.getenv("PR_TARGETED_MIN_PATCHABILITY_SCORE", "72"))
+_TARGETED_SHORTLIST_LIMIT = env_int("PR_TARGETED_SHORTLIST_LIMIT", 2)
+_TARGETED_VIABLE_LIMIT = env_int("PR_TARGETED_VIABLE_LIMIT", 1)
+_TARGETED_PLAN_ATTEMPTS = env_int("PR_TARGETED_PLAN_ATTEMPTS", 2)
+_TARGETED_GENERATE_ATTEMPTS = env_int("PR_TARGETED_GENERATE_ATTEMPTS", 2)
+_TARGETED_SELF_REVIEW_RETRIES = env_int("PR_TARGETED_SELF_REVIEW_RETRIES", 1)
+_TARGETED_MAX_CHANGED_FILES = env_int("PR_TARGETED_MAX_CHANGED_FILES", 2)
+_TARGETED_MAX_DIFF_LINES = env_int("PR_TARGETED_MAX_DIFF_LINES", 120)
+_TARGETED_MIN_PATCHABILITY_SCORE = env_int("PR_TARGETED_MIN_PATCHABILITY_SCORE", 72)
 _TARGETED_PATTERN_GENERATE_BUDGETS = {
     "overbroad_exception_handling": 1,
     "resource_cleanup_gap": 1,
@@ -1674,6 +1676,80 @@ def _check_pr_evidence_quality(result: dict, changed_files: dict[str, str]) -> s
 
 
 # ── PR log ────────────────────────────────────────────────────
+_PR_LOG_THREAD_LOCK = threading.Lock()
+
+
+@contextmanager
+def _pr_log_lock():
+    """Serialize pr_log.json read-modify-write cycles.
+
+    The thread lock covers in-process writers (the PR monitor thread vs the
+    main run); a best-effort OS file lock on a sidecar file covers concurrent
+    processes (MCP-spawned runs vs the daemon). Lock acquisition fails open —
+    PR logging must never break because of a locking quirk.
+    """
+    with _PR_LOG_THREAD_LOCK:
+        lock_handle = None
+        try:
+            PR_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            lock_handle = open(PR_LOG_FILE.with_suffix(".lock"), "a+")
+            if os.name == "nt":
+                import msvcrt
+                lock_handle.seek(0)
+                msvcrt.locking(lock_handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock_handle, fcntl.LOCK_EX)
+        except Exception:
+            if lock_handle is not None:
+                try:
+                    lock_handle.close()
+                except Exception:
+                    pass
+                lock_handle = None
+        try:
+            yield
+        finally:
+            if lock_handle is not None:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        lock_handle.seek(0)
+                        msvcrt.locking(lock_handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(lock_handle, fcntl.LOCK_UN)
+                except Exception:
+                    pass
+                try:
+                    lock_handle.close()
+                except Exception:
+                    pass
+
+
+def _merge_and_save_pr_log(entries: list[dict]) -> None:
+    """Write mutated entries back without clobbering concurrent appends.
+
+    The check loops hold their snapshot of the log for minutes while polling
+    the network; another process may have appended new PRs in the meantime.
+    Re-read the log under the lock and merge our entries by pr_url so those
+    appends survive.
+    """
+    with _pr_log_lock():
+        data = load_pr_log()
+        merged = data.setdefault("submitted", [])
+        index = {e.get("pr_url", ""): i for i, e in enumerate(merged)}
+        for entry in entries:
+            url = entry.get("pr_url", "")
+            if not url:
+                continue
+            if url in index:
+                merged[index[url]] = entry
+            else:
+                merged.append(entry)
+        PR_LOG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def load_pr_log() -> dict:
     if PR_LOG_FILE.exists():
         try:
@@ -1702,22 +1778,23 @@ def load_pr_log() -> dict:
 
 def save_pr_log(pr_result, improvement_type: str = "", opportunity_id: int | None = None) -> None:
     """Append a submitted PR to the log."""
-    data = load_pr_log()
-    data.setdefault("submitted", []).append({
-        "full_name":        pr_result.full_name,
-        "owner_login":      getattr(pr_result, "owner_login", ""),
-        "pr_url":           pr_result.pr_url,
-        "pr_title":         pr_result.pr_title,
-        "fork_name":        pr_result.fork_name,
-        "branch_name":      pr_result.branch_name,
-        "files_changed":    pr_result.files_changed,
-        "submitted_at":     pr_result.submitted_at,
-        "improvement_type": improvement_type,
-        "status":           "open",
-        "notified_merge":   False,
-        "opportunity_id":   opportunity_id,
-    })
-    PR_LOG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    with _pr_log_lock():
+        data = load_pr_log()
+        data.setdefault("submitted", []).append({
+            "full_name":        pr_result.full_name,
+            "owner_login":      getattr(pr_result, "owner_login", ""),
+            "pr_url":           pr_result.pr_url,
+            "pr_title":         pr_result.pr_title,
+            "fork_name":        pr_result.fork_name,
+            "branch_name":      pr_result.branch_name,
+            "files_changed":    pr_result.files_changed,
+            "submitted_at":     pr_result.submitted_at,
+            "improvement_type": improvement_type,
+            "status":           "open",
+            "notified_merge":   False,
+            "opportunity_id":   opportunity_id,
+        })
+        PR_LOG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     _ENGINE_STORE.record_pull_request(
         opportunity_id=opportunity_id,
         repo_full_name=pr_result.full_name,
@@ -2029,7 +2106,7 @@ def check_pr_statuses(log: logging.Logger) -> None:
 
     print_blank()
     if changed:
-        PR_LOG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        _merge_and_save_pr_log(data.get("submitted", []))
         log.info("PR log updated")
     else:
         print_item("No status changes.")
@@ -2685,7 +2762,7 @@ def check_pr_feedback(log: logging.Logger) -> None:
 
     print_blank()
     if changed:
-        PR_LOG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        _merge_and_save_pr_log(data.get("submitted", []))
         log.info("PR log updated")
     else:
         print_item("No new feedback on any open PR.")
@@ -2742,7 +2819,7 @@ def check_all_prs(log: logging.Logger) -> None:
         print_item("No open PRs.")
         print_blank()
         if changed:
-            PR_LOG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            _merge_and_save_pr_log(data.get("submitted", []))
         return
 
     for entry in open_entries:
@@ -2986,7 +3063,7 @@ def check_all_prs(log: logging.Logger) -> None:
         time.sleep(0.5)
 
     if changed:
-        PR_LOG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        _merge_and_save_pr_log(data.get("submitted", []))
         log.info("PR log updated")
     else:
         print_item("No status changes or new feedback.")
@@ -2994,7 +3071,7 @@ def check_all_prs(log: logging.Logger) -> None:
 
 
 # ── Search for PR target ──────────────────────────────────────
-_FOLLOWUP_COOLDOWN_DAYS = int(os.getenv("PR_FOLLOWUP_COOLDOWN_DAYS", "30"))
+_FOLLOWUP_COOLDOWN_DAYS = env_int("PR_FOLLOWUP_COOLDOWN_DAYS", 30)
 
 
 def get_followup_candidates(

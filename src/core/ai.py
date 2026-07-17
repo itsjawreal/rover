@@ -597,21 +597,10 @@ def _call_backend(
             ) from exc
         raise
 
-    # Write stdin and close only for stdin-driven backends.
-    if stdin_payload is not None:
-        try:
-            proc.stdin.write(stdin_payload)
-        except BrokenPipeError as exc:
-            proc.wait(timeout=5)
-            stderr_text = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
-            stdout_text = proc.stdout.read().decode("utf-8", errors="replace") if proc.stdout else ""
-            if fatal_runtime_issue := _detect_backend_runtime_issue(stderr_text, stdout_text):
-                raise fatal_runtime_issue from exc
-            error_text = _extract_error_text(stderr_text, stdout_text)
-            raise BackendRuntimeError(f"{backend_label} backend closed stdin early: {error_text[:300]}") from exc
-    proc.stdin.close()
-
-    # Read stdout/stderr in background threads so output streams to disk while generating
+    # Read stdout/stderr in background threads so output streams to disk while
+    # generating. Started before the stdin write: a large prompt can exceed the
+    # pipe buffer, and if the child emits output while stdin is still being
+    # written, nothing would drain it and both sides would block forever.
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
     t_out = threading.Thread(
@@ -622,6 +611,28 @@ def _call_backend(
     )
     t_out.start()
     t_err.start()
+
+    # Write stdin and close only for stdin-driven backends.
+    if stdin_payload is not None:
+        try:
+            proc.stdin.write(stdin_payload)
+        except BrokenPipeError as exc:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            t_out.join(10)
+            t_err.join(10)
+            stderr_text = "".join(stderr_chunks)
+            stdout_text = "".join(stdout_chunks)
+            if fatal_runtime_issue := _detect_backend_runtime_issue(stderr_text, stdout_text):
+                raise fatal_runtime_issue from exc
+            error_text = _extract_error_text(stderr_text, stdout_text)
+            raise BackendRuntimeError(f"{backend_label} backend closed stdin early: {error_text[:300]}") from exc
+    try:
+        proc.stdin.close()
+    except OSError:
+        pass
 
     t_out.join(timeout)
     timed_out = t_out.is_alive()
@@ -664,7 +675,9 @@ def _call_backend(
             )
             _record_usage(prompt, stdout_text)
             time.sleep(wait_seconds)
-            return _call_backend(prompt, timeout=timeout, auto_wait_cycles=auto_wait_cycles + 1)
+            return _call_backend(
+                prompt, timeout=timeout, auto_wait_cycles=auto_wait_cycles + 1, stream_path=stream_path
+            )
 
         if any(kw in err_lower for kw in CREDIT_LIMIT_KEYWORDS):
             _record_usage(prompt, stdout_text)

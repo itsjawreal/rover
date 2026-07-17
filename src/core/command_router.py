@@ -216,11 +216,14 @@ def _extract_goal(normalized: str) -> str:
 def _wants_live_submission(normalized: str) -> bool:
     if normalized.startswith("run "):
         return True
+    # "submit" must be a whole word: "already submitted PRs" is a status
+    # question, not a request to disable dry-run.
+    if _has_word(normalized, "submit"):
+        return True
     return _matches_any(
         normalized,
         "menisik run",
         "rover run",
-        "submit",
         "open pr",
         "create pr now",
         "live run",
@@ -259,11 +262,16 @@ def _looks_like_repo_scan(normalized: str) -> bool:
 
 
 def _looks_like_contribution_request(normalized: str) -> bool:
+    # Whole-word matching: bare substrings misfire badly here ("pr" is inside
+    # "pretty"/"press", "open" inside "opened") and can turn casual text into
+    # a contribution run.
     contribution_words = (
         "contrib",
         "contribution",
+        "contributions",
         "pull request",
         "pr",
+        "prs",
     )
     action_words = (
         "create",
@@ -273,7 +281,9 @@ def _looks_like_contribution_request(normalized: str) -> bool:
         "open",
         "submit",
     )
-    if any(word in normalized for word in contribution_words) and any(word in normalized for word in action_words):
+    if any(_has_word(normalized, word) for word in contribution_words) and any(
+        _has_word(normalized, word) for word in action_words
+    ):
         return True
     if _extract_repo(normalized) and _matches_any(
         normalized,
@@ -292,3 +302,7 @@ def _looks_like_contribution_request(normalized: str) -> bool:
 
 def _matches_any(text: str, *phrases: str) -> bool:
     return any(phrase in text for phrase in phrases)
+
+
+def _has_word(text: str, word: str) -> bool:
+    return re.search(rf"\b{re.escape(word)}\b", text) is not None

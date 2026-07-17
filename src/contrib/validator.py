@@ -8,12 +8,13 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.core.config import env_int
 from src.contrib.patch_generator import PatchPlan
 from src.analysis.project_inspector import ProjectInspection
 
-MAX_PATCH_LINES = int(os.getenv("PR_MAX_PATCH_LINES", "200"))
-MAX_TOUCHED_FILES = int(os.getenv("PR_MAX_TOUCHED_FILES", "3"))
-_SANDBOX_TIMEOUT = int(os.getenv("PR_SANDBOX_TIMEOUT_SECS", "15"))
+MAX_PATCH_LINES = env_int("PR_MAX_PATCH_LINES", 200)
+MAX_TOUCHED_FILES = env_int("PR_MAX_TOUCHED_FILES", 3)
+_SANDBOX_TIMEOUT = env_int("PR_SANDBOX_TIMEOUT_SECS", 15)
 _INFRA_ERRORS = ("ModuleNotFoundError", "ImportError", "No module named", "cannot import")
 
 
@@ -77,10 +78,14 @@ def run_sandbox_validation(changed_files: dict[str, str], test_target: str = "")
                     timeout=_SANDBOX_TIMEOUT,
                 )
             except subprocess.TimeoutExpired:
+                # Infra issue, not a patch defect — don't block the patch, but
+                # never claim verification for code that was never compiled.
+                # Empty sandbox_output routes callers to their non-actionable
+                # path (proceed without a repair retry).
                 return ValidationResult(
                     status="passed",
-                    summary="Sandbox compile timed out; treating as infra issue.",
-                    sandbox_verified=True,
+                    summary="Sandbox compile timed out; treating as infra issue (not verified).",
+                    sandbox_verified=False,
                 )
             if result.returncode != 0:
                 err = (result.stderr or result.stdout or "").strip()

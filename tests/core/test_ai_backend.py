@@ -125,20 +125,15 @@ class AIBackendSelectionTests(unittest.TestCase):
         self.assertEqual(usage["prompt_chars"], 3)
 
     def test_call_backend_normalizes_broken_pipe_during_stdin_write(self) -> None:
-        class _Reader:
-            def __init__(self, text: bytes) -> None:
-                self._text = text
-
-            def read(self) -> bytes:
-                return self._text
-
         class _BrokenPipeProc:
             def __init__(self) -> None:
                 self.stdin = Mock()
                 self.stdin.write.side_effect = BrokenPipeError()
                 self.stdin.close = Mock()
-                self.stdout = _Reader(b"")
-                self.stderr = _Reader(b"backend refused stdin")
+                # stdout/stderr are drained by background reader threads, which
+                # iterate them line by line.
+                self.stdout = [b""]
+                self.stderr = [b"backend refused stdin"]
                 self.returncode = 1
 
             def wait(self, timeout: int | None = None) -> int:
